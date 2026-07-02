@@ -34,12 +34,12 @@ import { AuthScreen } from "./components/AuthScreen";
 import { LocalCommunity } from "./types";
 
 const firebaseConfig = {
-  apiKey: (import.meta as any).env.VITE_FIREBASE_API_KEY || "AIzaSyCfoqz83kbNihY4k6MRb1x7TiwJauN1F8E",
-  authDomain: (import.meta as any).env.VITE_FIREBASE_AUTH_DOMAIN || "extended-ether-x2t1j.firebaseapp.com",
-  projectId: (import.meta as any).env.VITE_FIREBASE_PROJECT_ID || "extended-ether-x2t1j",
-  storageBucket: (import.meta as any).env.VITE_FIREBASE_STORAGE_BUCKET || "extended-ether-x2t1j.firebasestorage.app",
-  messagingSenderId: (import.meta as any).env.VITE_FIREBASE_MESSAGING_SENDER_ID || "361310188864",
-  appId: (import.meta as any).env.VITE_FIREBASE_APP_ID || "1:361310188864:web:0a3d6c97c01d4551caf6a5"
+  apiKey: (import.meta as any).env.VITE_FIREBASE_API_KEY || "AIzaSyCn0g3Q9SGIl5ieI9euatMpwJjQ36P2mts",
+  authDomain: (import.meta as any).env.VITE_FIREBASE_AUTH_DOMAIN || "geochat-link.firebaseapp.com",
+  projectId: (import.meta as any).env.VITE_FIREBASE_PROJECT_ID || "geochat-link",
+  storageBucket: (import.meta as any).env.VITE_FIREBASE_STORAGE_BUCKET || "geochat-link.firebasestorage.app",
+  messagingSenderId: (import.meta as any).env.VITE_FIREBASE_MESSAGING_SENDER_ID || "746218402715",
+  appId: (import.meta as any).env.VITE_FIREBASE_APP_ID || "1:746218402715:web:47cdddf3de1ded503de73e"
 };
 
 const firebaseApp = initializeApp(firebaseConfig);
