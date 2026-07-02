@@ -45,10 +45,7 @@ const firebaseConfig = {
 const firebaseApp = initializeApp(firebaseConfig);
 const db = (import.meta as any).env.VITE_FIREBASE_DATABASE_ID 
   ? getFirestore(firebaseApp, (import.meta as any).env.VITE_FIREBASE_DATABASE_ID)
-  : ((import.meta as any).env.VITE_FIREBASE_PROJECT_ID 
-      ? getFirestore(firebaseApp)
-      : getFirestore(firebaseApp, "ai-studio-chatstackworkspa-a4f85a62-eb6f-4c5c-9808-6b19be2ce1ba")
-    );
+  : getFirestore(firebaseApp);
 const auth = getAuth(firebaseApp);
 
 enum OperationType {

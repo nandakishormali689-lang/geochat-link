@@ -1,10 +1,10 @@
 {
-  "projectId": "extended-ether-x2t1j",
-  "appId": "1:361310188864:web:0a3d6c97c01d4551caf6a5",
-  "apiKey": "AIzaSyCfoqz83kbNihY4k6MRb1x7TiwJauN1F8E",
-  "authDomain": "extended-ether-x2t1j.firebaseapp.com",
-  "firestoreDatabaseId": "ai-studio-chatstackworkspa-a4f85a62-eb6f-4c5c-9808-6b19be2ce1ba",
-  "storageBucket": "extended-ether-x2t1j.firebasestorage.app",
-  "messagingSenderId": "361310188864",
-  "measurementId": ""
+  "projectId": "geochat-link",
+  "appId": "1:746218402715:web:47cdddf3de1ded503de73e",
+  "apiKey": "AIzaSyCn0g3Q9SGIl5ieI9euatMpwJjQ36P2mts",
+  "authDomain": "geochat-link.firebaseapp.com",
+  "firestoreDatabaseId": "",
+  "storageBucket": "geochat-link.firebasestorage.app",
+  "messagingSenderId": "746218402715",
+  "measurementId": "G-F93059TMPT"
 }
