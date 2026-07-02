@@ -1,0 +1,6 @@
+{
+  "name": "ChatStack Workspace & Geochat Link",
+  "description": "An interactive full-stack chat application blueprint, cost-efficient free tier developer guide, and a live 'People Around Me' social geochat simulation with real server-side Gemini AI features, video/voice calls, and interest matching.",
+  "requestFramePermissions": ["camera", "microphone", "geolocation"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

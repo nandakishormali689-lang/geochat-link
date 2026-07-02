@@ -1,0 +1,93 @@
+{
+  "entities": {
+    "User": {
+      "title": "User Profile",
+      "description": "User account and profile coordinates",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "avatar": { "type": "string" },
+        "avatarSeed": { "type": "string" },
+        "bio": { "type": "string" },
+        "interests": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "latitude": { "type": "number" },
+        "longitude": { "type": "number" },
+        "online": { "type": "boolean" },
+        "lastActive": { "type": "object" }
+      },
+      "required": ["id", "name", "avatar", "latitude", "longitude"]
+    },
+    "Community": {
+      "title": "Community",
+      "description": "A local geofenced chat community",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "category": { "type": "string" },
+        "description": { "type": "string" },
+        "icon": { "type": "string" },
+        "membersCount": { "type": "number" },
+        "latitude": { "type": "number" },
+        "longitude": { "type": "number" }
+      },
+      "required": ["id", "name", "category", "latitude", "longitude"]
+    },
+    "Connection": {
+      "title": "Connection",
+      "description": "Direct chat link between two nearby users",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "members": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "status": { "type": "string" },
+        "senderId": { "type": "string" },
+        "receiverId": { "type": "string" }
+      },
+      "required": ["id", "members", "status"]
+    },
+    "Message": {
+      "title": "Message",
+      "description": "A text message sent in a community or connection chatroom",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "senderId": { "type": "string" },
+        "senderName": { "type": "string" },
+        "senderAvatar": { "type": "string" },
+        "text": { "type": "string" },
+        "timestamp": { "type": "object" }
+      },
+      "required": ["senderId", "text"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "Individual user profiles"
+    },
+    "/communities/{communityId}": {
+      "schema": "Community",
+      "description": "Chat groups tagged by topic and coordinates"
+    },
+    "/communities/{communityId}/messages/{messageId}": {
+      "schema": "Message",
+      "description": "Messages sent in a community chat room"
+    },
+    "/connections/{connectionId}": {
+      "schema": "Connection",
+      "description": "Direct message matching statuses"
+    },
+    "/connections/{connectionId}/messages/{messageId}": {
+      "schema": "Message",
+      "description": "Direct messages sent in a 1-to-1 connection chat"
+    }
+  }
+}
