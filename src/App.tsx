@@ -34,16 +34,21 @@ import { AuthScreen } from "./components/AuthScreen";
 import { LocalCommunity } from "./types";
 
 const firebaseConfig = {
-  apiKey: "AIzaSyCfoqz83kbNihY4k6MRb1x7TiwJauN1F8E",
-  authDomain: "extended-ether-x2t1j.firebaseapp.com",
-  projectId: "extended-ether-x2t1j",
-  storageBucket: "extended-ether-x2t1j.firebasestorage.app",
-  messagingSenderId: "361310188864",
-  appId: "1:361310188864:web:0a3d6c97c01d4551caf6a5"
+  apiKey: (import.meta as any).env.VITE_FIREBASE_API_KEY || "AIzaSyCfoqz83kbNihY4k6MRb1x7TiwJauN1F8E",
+  authDomain: (import.meta as any).env.VITE_FIREBASE_AUTH_DOMAIN || "extended-ether-x2t1j.firebaseapp.com",
+  projectId: (import.meta as any).env.VITE_FIREBASE_PROJECT_ID || "extended-ether-x2t1j",
+  storageBucket: (import.meta as any).env.VITE_FIREBASE_STORAGE_BUCKET || "extended-ether-x2t1j.firebasestorage.app",
+  messagingSenderId: (import.meta as any).env.VITE_FIREBASE_MESSAGING_SENDER_ID || "361310188864",
+  appId: (import.meta as any).env.VITE_FIREBASE_APP_ID || "1:361310188864:web:0a3d6c97c01d4551caf6a5"
 };
 
 const firebaseApp = initializeApp(firebaseConfig);
-const db = getFirestore(firebaseApp, "ai-studio-chatstackworkspa-a4f85a62-eb6f-4c5c-9808-6b19be2ce1ba");
+const db = (import.meta as any).env.VITE_FIREBASE_DATABASE_ID 
+  ? getFirestore(firebaseApp, (import.meta as any).env.VITE_FIREBASE_DATABASE_ID)
+  : ((import.meta as any).env.VITE_FIREBASE_PROJECT_ID 
+      ? getFirestore(firebaseApp)
+      : getFirestore(firebaseApp, "ai-studio-chatstackworkspa-a4f85a62-eb6f-4c5c-9808-6b19be2ce1ba")
+    );
 const auth = getAuth(firebaseApp);
 
 enum OperationType {
