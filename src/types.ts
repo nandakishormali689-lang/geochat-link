@@ -54,3 +54,15 @@ export interface CallState {
   partnerAvatar?: string;
   duration?: number;
 }
+
+export interface Story {
+  id: string;
+  userId: string;
+  userName: string;
+  avatar: string;
+  content: string;
+  type: "public" | "private";
+  timestamp: Date;
+  latitude: number;
+  longitude: number;
+}

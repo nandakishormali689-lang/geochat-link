@@ -7,7 +7,7 @@ import {
   ChevronRight, Sparkles, Play, Square, Info, RefreshCw, X, Palette, Clock, Film, Plus
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
-import { StackFeature, ChatMessage, NearbyUser, CallState } from "./types";
+import { StackFeature, ChatMessage, NearbyUser, CallState, Story } from "./types";
 import { STACK_FEATURES, INITIAL_NEARBY_USERS, INITIAL_COMMUNITIES, INTERESTS_LIST } from "./data";
 import { initializeApp } from "firebase/app";
 import { 
@@ -109,6 +109,18 @@ function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: numbe
 }
 
 export default function App() {
+  // Scroll collapse states
+  const [isScrolled, setIsScrolled] = useState(false);
+  const [isForceExpanded, setIsForceExpanded] = useState(false);
+
+  useEffect(() => {
+    const handleScroll = () => {
+      setIsScrolled(window.scrollY > 20);
+    };
+    window.addEventListener("scroll", handleScroll);
+    return () => window.removeEventListener("scroll", handleScroll);
+  }, []);
+
   // Navigation
   const [activeTab, setActiveTab] = useState<"developer" | "app_demo">("app_demo");
 
@@ -140,12 +152,18 @@ export default function App() {
     bio: string;
     latitude: number;
     longitude: number;
+    visibility: "public" | "private";
   }>(() => {
     const saved = localStorage.getItem("geochat_profile");
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        if (parsed.id) return parsed;
+        if (parsed.id) {
+          return {
+            ...parsed,
+            visibility: parsed.visibility || "public"
+          };
+        }
       } catch (e) {}
     }
     const randId = `user_${Math.random().toString(36).substring(2, 9)}`;
@@ -157,6 +175,7 @@ export default function App() {
       bio: "Active member searching for cool people nearby!",
       latitude: 37.7749 + (Math.random() - 0.5) * 0.05,
       longitude: -122.4194 + (Math.random() - 0.5) * 0.05,
+      visibility: "public" as const
     };
     localStorage.setItem("geochat_profile", JSON.stringify(newProfile));
     return newProfile;
@@ -183,6 +202,13 @@ export default function App() {
   // Dynamic User database (synchronized from Firestore in real-time)
   const [nearbyPeople, setNearbyPeople] = useState<NearbyUser[]>([]);
   const [connectionsData, setConnectionsData] = useState<{ [userId: string]: { status: string; senderId: string; receiverId: string; connectionId: string } }>({});
+  
+  // Instagram-like Stories state
+  const [stories, setStories] = useState<Story[]>([]);
+  const [newStoryContent, setNewStoryContent] = useState("");
+  const [newStoryType, setNewStoryType] = useState<"public" | "private">("public");
+  const [isSubmittingStory, setIsSubmittingStory] = useState(false);
+  const [activeStoryGroup, setActiveStoryGroup] = useState<{ userName: string; avatar: string; stories: Story[] } | null>(null);
   
   // Active Chat and Conversations
   const [activeChatId, setActiveChatId] = useState<string>("ai-assistant");
@@ -293,7 +319,8 @@ export default function App() {
           interests: data.interests || [],
           bio: data.bio || "Active Geochat member",
           latitude: data.latitude || 37.7749,
-          longitude: data.longitude || -122.4194
+          longitude: data.longitude || -122.4194,
+          visibility: data.visibility || "public"
         });
         if (data.joinedCommunities) {
           setJoinedCommunities(data.joinedCommunities);
@@ -307,7 +334,8 @@ export default function App() {
           interests: ["coding", "music"],
           bio: "Active Geochat member",
           latitude: 37.7749,
-          longitude: -122.4194
+          longitude: -122.4194,
+          visibility: "public" as const
         };
         setDoc(userRef, {
           ...fallbackProfile,
@@ -448,13 +476,6 @@ export default function App() {
       snapshot.forEach((doc) => {
         const data = doc.data();
         if (data.id !== myProfile.id && !data.id.startsWith("user-")) {
-          const dist = calculateDistance(
-            myProfile.latitude || 37.7749,
-            myProfile.longitude || -122.4194,
-            data.latitude || 37.7749,
-            data.longitude || -122.4194
-          );
-          
           let status: "none" | "sent" | "received" | "accepted" = "none";
           const conn = connectionsData[data.id];
           if (conn) {
@@ -464,6 +485,18 @@ export default function App() {
               status = conn.senderId === myProfile.id ? "sent" : "received";
             }
           }
+
+          // Privacy Check: if user's profile is PRIVATE and we are not accepted friends, hide them from radar discovery!
+          if (data.visibility === "private" && status !== "accepted") {
+            return;
+          }
+
+          const dist = calculateDistance(
+            myProfile.latitude || 37.7749,
+            myProfile.longitude || -122.4194,
+            data.latitude || 37.7749,
+            data.longitude || -122.4194
+          );
 
           usersList.push({
             id: data.id,
@@ -485,6 +518,42 @@ export default function App() {
     });
     return () => unsubscribe();
   }, [db, myProfile.id, myProfile.latitude, myProfile.longitude, connectionsData, authUser]);
+
+  // Real-time Listener for ALL Stories in Firestore (filtered for 24 hours, desc order)
+  useEffect(() => {
+    if (!db || !authUser || !myProfile.id) return;
+    const q = query(collection(db, "stories"));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const list: Story[] = [];
+      const now = new Date().getTime();
+      snapshot.forEach((doc) => {
+        const data = doc.data();
+        const storyTime = data.timestamp?.toDate() || new Date();
+        const hrsDiff = (now - storyTime.getTime()) / (1000 * 60 * 60);
+        
+        // Keep stories shared in the last 24 hours
+        if (hrsDiff < 24) {
+          list.push({
+            id: doc.id,
+            userId: data.userId,
+            userName: data.userName,
+            avatar: data.avatar,
+            content: data.content,
+            type: data.type || "public",
+            timestamp: storyTime,
+            latitude: data.latitude || 37.7749,
+            longitude: data.longitude || -122.4194
+          });
+        }
+      });
+      // Sort descending (latest first)
+      list.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
+      setStories(list);
+    }, (err) => {
+      console.error("Stories snapshot error:", err);
+    });
+    return () => unsubscribe();
+  }, [db, authUser, myProfile.id]);
 
   // 4. Real-time Listener for the active Chat Session's messages
   useEffect(() => {
@@ -814,7 +883,8 @@ export default function App() {
         avatarSeed: myProfile.avatarSeed,
         avatar: `https://api.dicebear.com/7.x/adventurer/svg?seed=${myProfile.avatarSeed}`,
         interests: myProfile.interests,
-        bio: myProfile.bio || ""
+        bio: myProfile.bio || "",
+        visibility: myProfile.visibility || "public"
       }, { merge: true });
       triggerAlert("Profile successfully synchronized to Cloud Firestore!", "success");
     } catch (err) {
@@ -822,6 +892,55 @@ export default function App() {
       triggerAlert("Failed to save profile details to Cloud Firestore.", "error");
     }
   };
+
+  // Post dynamic story/status to Firestore
+  const handlePostStory = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newStoryContent.trim() || !db || !myProfile.id) return;
+    setIsSubmittingStory(true);
+    try {
+      const avatarUrl = `https://api.dicebear.com/7.x/adventurer/svg?seed=${myProfile.avatarSeed}`;
+      await addDoc(collection(db, "stories"), {
+        userId: myProfile.id,
+        userName: myProfile.name,
+        avatar: avatarUrl,
+        content: newStoryContent.trim(),
+        type: newStoryType,
+        timestamp: serverTimestamp(),
+        latitude: myProfile.latitude || 37.7749,
+        longitude: myProfile.longitude || -122.4194
+      });
+      setNewStoryContent("");
+      triggerAlert(`Your ${newStoryType} story has been shared!`, "success");
+    } catch (err) {
+      console.error("Failed to share story:", err);
+      triggerAlert("Failed to post story.", "error");
+    } finally {
+      setIsSubmittingStory(false);
+    }
+  };
+
+  // Filter visible stories based on location and friendship
+  const visibleStories = stories.filter(story => {
+    if (story.userId === myProfile.id) return true;
+
+    // Check if friends
+    const conn = connectionsData[story.userId];
+    const isFriend = conn && conn.status === "accepted";
+
+    if (story.type === "private") {
+      return isFriend;
+    }
+
+    // Public story - visible if within radar radius
+    const dist = calculateDistance(
+      myProfile.latitude || 37.7749,
+      myProfile.longitude || -122.4194,
+      story.latitude || 37.7749,
+      story.longitude || -122.4194
+    );
+    return dist <= searchRadius;
+  });
 
   // Radians to match people dynamically
   const filteredPeople = nearbyPeople.filter(person => {
@@ -1323,16 +1442,15 @@ export default function App() {
           )}
         </AnimatePresence>
         
-        <header className="bg-[#0F172A] border-b border-slate-800 px-6 py-4 flex flex-col sm:flex-row items-center justify-between gap-4">
+        <header className="bg-[#0F172A] border-b border-slate-800 sticky top-0 z-40 px-4 py-3 flex flex-row items-center justify-between gap-4 transition-all duration-300">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-slate-900 flex items-center justify-center text-white shadow-sm border border-slate-700">
-              <Compass className="w-5 h-5 text-emerald-400" />
+            <div className="w-8 h-8 rounded-lg bg-slate-900 flex items-center justify-center text-white shadow-sm border border-slate-700">
+              <Compass className="w-4 h-4 text-emerald-400" />
             </div>
             <div>
-              <h1 className="text-xl font-black tracking-tight text-white flex items-center gap-1.5">
-                Geochat Link <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 uppercase tracking-wider border border-emerald-500/20">Real-Time Firestore & GPS</span>
+              <h1 className="text-lg font-black tracking-tight text-white flex items-center gap-1.5 select-none">
+                Geochat Link
               </h1>
-              <p className="text-xs text-slate-400">Discover nearby people and communities matched by physical coordinates and mutual interests. Chat 100% in real-time.</p>
             </div>
           </div>
         </header>
@@ -1369,130 +1487,145 @@ export default function App() {
       </AnimatePresence>
 
       {/* Elegant Header */}
-      <header className="bg-[#0F172A] border-b border-slate-800 sticky top-0 z-40 px-6 py-4 flex flex-col sm:flex-row items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-slate-900 flex items-center justify-center text-white shadow-sm border border-slate-700">
-            <Compass className="w-5 h-5 text-emerald-400" />
-          </div>
-          <div>
-            <h1 className="text-xl font-black tracking-tight text-white flex items-center gap-1.5">
-              Geochat Link <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 uppercase tracking-wider border border-emerald-500/20">Real-Time Firestore & GPS</span>
-            </h1>
-            <p className="text-xs text-slate-400">Discover nearby people and communities matched by physical coordinates and mutual interests. Chat 100% in real-time.</p>
-          </div>
-        </div>
-
-        {authUser && (
-          <div className="flex items-center gap-3 relative shrink-0 self-end sm:self-auto">
-            {/* Bell Icon & Notification Dropdown */}
-            <div className="relative">
-              <button
-                id="btn-bell-notifications"
-                onClick={() => setShowRequestsDropdown(prev => !prev)}
-                className="p-2.5 bg-slate-900/80 hover:bg-slate-800/90 border border-slate-800 hover:border-slate-700 text-slate-300 hover:text-white rounded-xl transition-all relative cursor-pointer flex items-center justify-center shadow-sm"
-              >
-                <Bell className="w-4 h-4" />
-                {receivedRequests.length > 0 && (
-                  <span className="absolute -top-1.5 -right-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-rose-500 text-[9px] font-bold text-white ring-2 ring-[#0F172A] animate-bounce">
-                    {receivedRequests.length}
+      <header className={`bg-[#0F172A] border-b border-slate-800 sticky top-0 z-40 px-4 md:px-6 transition-all duration-300 ease-in-out ${isScrolled && !isForceExpanded ? "py-2.5 shadow-md shadow-slate-950/25" : "py-4"}`}>
+        <div className="max-w-7xl mx-auto flex flex-row items-center justify-between gap-2">
+          <div 
+            onClick={() => setIsForceExpanded(prev => !prev)}
+            className="flex items-center gap-2.5 cursor-pointer select-none group active:scale-95 transition-transform"
+            title={isForceExpanded ? "Click to lock collapsed" : "Click to expand header"}
+          >
+            <div className={`rounded-xl bg-slate-900 flex items-center justify-center text-white shadow-sm border border-slate-700 group-hover:border-emerald-500/50 transition-all duration-300 ${isScrolled && !isForceExpanded ? "w-8 h-8" : "w-10 h-10"}`}>
+              <Compass className={`text-emerald-400 group-hover:rotate-12 transition-transform duration-300 ${isScrolled && !isForceExpanded ? "w-4 h-4" : "w-5 h-5"}`} />
+            </div>
+            <div>
+              <h1 className={`font-black tracking-tight text-white flex items-center gap-1.5 transition-all duration-300 ${isScrolled && !isForceExpanded ? "text-base" : "text-xl"}`}>
+                Geochat Link
+                {isScrolled && (
+                  <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded transition-all ${isForceExpanded ? 'bg-emerald-500/10 text-emerald-400' : 'bg-slate-800 text-slate-400'}`}>
+                    {isForceExpanded ? "Expanded" : "Tap logo"}
                   </span>
                 )}
-              </button>
-
-              {/* Requests Dropdown */}
-              <AnimatePresence>
-                {showRequestsDropdown && (
-                  <motion.div
-                    initial={{ opacity: 0, y: 10, scale: 0.95 }}
-                    animate={{ opacity: 1, y: 0, scale: 1 }}
-                    exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                    transition={{ duration: 0.15 }}
-                    className="absolute right-0 mt-2.5 w-72 bg-white rounded-xl border border-slate-200 shadow-xl overflow-hidden z-50 text-slate-800"
-                  >
-                    <div className="bg-slate-50 px-4 py-3 border-b border-slate-200 flex items-center justify-between">
-                      <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
-                        Friend Requests ({receivedRequests.length})
-                      </span>
-                      {receivedRequests.length > 0 && (
-                        <span className="text-[9px] font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded-full">
-                          Pending Action
-                        </span>
-                      )}
-                    </div>
-
-                    <div className="max-h-64 overflow-y-auto divide-y divide-slate-100">
-                      {receivedRequests.length === 0 ? (
-                        <div className="p-5 text-center text-xs text-slate-400 font-medium">
-                          No pending requests
-                        </div>
-                      ) : (
-                        receivedRequests.map((req) => (
-                          <div key={req.userId} className="p-3.5 flex items-start gap-2.5 hover:bg-slate-50 transition-colors">
-                            <img
-                              src={req.avatar}
-                              alt={req.name}
-                              className="w-8 h-8 rounded-lg bg-slate-100 object-contain shrink-0 mt-0.5"
-                              referrerPolicy="no-referrer"
-                            />
-                            <div className="flex-1 min-w-0">
-                              <h4 className="text-xs font-bold text-slate-800 truncate">{req.name}</h4>
-                              <p className="text-[10px] text-slate-400 mt-0.5 font-medium">Wants to connect with you</p>
-                              
-                              <div className="flex gap-1.5 mt-2.5">
-                                <button
-                                  id={`bell-accept-${req.userId}`}
-                                  onClick={() => {
-                                    handleAcceptRequest(req.userId);
-                                    setShowRequestsDropdown(false);
-                                  }}
-                                  className="flex-1 bg-emerald-500 hover:bg-emerald-600 text-white font-extrabold text-[9px] uppercase tracking-wider py-1.5 rounded transition-all cursor-pointer text-center"
-                                >
-                                  Accept
-                                </button>
-                                <button
-                                  id={`bell-decline-${req.userId}`}
-                                  onClick={() => {
-                                    handleDeclineRequest(req.userId);
-                                  }}
-                                  className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-600 font-extrabold text-[9px] uppercase tracking-wider py-1.5 rounded transition-all cursor-pointer text-center"
-                                >
-                                  Decline
-                                </button>
-                              </div>
-                            </div>
-                          </div>
-                        ))
-                      )}
-                    </div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </div>
-
-            <div className="flex items-center gap-3 bg-slate-900/80 border border-slate-800 px-3.5 py-1.5 rounded-xl">
-              <img 
-                src={avatarUrl} 
-                alt="My Profile avatar" 
-                className="w-7 h-7 rounded bg-slate-950 object-contain"
-                referrerPolicy="no-referrer"
-              />
-              <div>
-                <span className="text-[9px] font-bold text-slate-400 block uppercase tracking-wider leading-none">Logged In As</span>
-                <span className="text-xs font-black text-slate-100 block mt-1 leading-none">{myProfile.name}</span>
-              </div>
-              <button
-                onClick={() => {
-                  signOut(auth).then(() => {
-                    triggerAlert("Signed out successfully from Geochat workspace.", "info");
-                  });
-                }}
-                className="ml-2 bg-rose-500/20 hover:bg-rose-500/30 border border-rose-500/30 text-rose-400 hover:text-rose-300 transition-colors font-bold text-[9px] uppercase tracking-wider px-2.5 py-1.5 rounded cursor-pointer"
-              >
-                Log Out
-              </button>
+              </h1>
             </div>
           </div>
-        )}
+
+          {authUser && (
+            <div className="flex items-center gap-2 md:gap-3 relative shrink-0">
+              {/* Bell Icon & Notification Dropdown */}
+              <div className="relative">
+                <button
+                  id="btn-bell-notifications"
+                  onClick={() => setShowRequestsDropdown(prev => !prev)}
+                  className={`bg-slate-900/80 hover:bg-slate-800/90 border border-slate-800 hover:border-slate-700 text-slate-300 hover:text-white rounded-xl transition-all relative cursor-pointer flex items-center justify-center shadow-sm ${isScrolled && !isForceExpanded ? "p-2" : "p-2.5"}`}
+                >
+                  <Bell className={`${isScrolled && !isForceExpanded ? "w-3.5 h-3.5" : "w-4 h-4"}`} />
+                  {receivedRequests.length > 0 && (
+                    <span className="absolute -top-1.5 -right-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-rose-500 text-[9px] font-bold text-white ring-2 ring-[#0F172A] animate-bounce">
+                      {receivedRequests.length}
+                    </span>
+                  )}
+                </button>
+
+                {/* Requests Dropdown */}
+                <AnimatePresence>
+                  {showRequestsDropdown && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                      transition={{ duration: 0.15 }}
+                      className="absolute right-0 mt-2.5 w-72 bg-white rounded-xl border border-slate-200 shadow-xl overflow-hidden z-50 text-slate-800 origin-top-right -right-12 sm:right-0"
+                    >
+                      <div className="bg-slate-50 px-4 py-3 border-b border-slate-200 flex items-center justify-between">
+                        <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                          Friend Requests ({receivedRequests.length})
+                        </span>
+                        {receivedRequests.length > 0 && (
+                          <span className="text-[9px] font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded-full">
+                            Pending Action
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="max-h-64 overflow-y-auto divide-y divide-slate-100">
+                        {receivedRequests.length === 0 ? (
+                          <div className="p-5 text-center text-xs text-slate-400 font-medium">
+                            No pending requests
+                          </div>
+                        ) : (
+                          receivedRequests.map((req) => (
+                            <div key={req.userId} className="p-3.5 flex items-start gap-2.5 hover:bg-slate-50 transition-colors">
+                              <img
+                                src={req.avatar}
+                                alt={req.name}
+                                className="w-8 h-8 rounded-lg bg-slate-100 object-contain shrink-0 mt-0.5"
+                                referrerPolicy="no-referrer"
+                              />
+                              <div className="flex-1 min-w-0">
+                                <h4 className="text-xs font-bold text-slate-800 truncate">{req.name}</h4>
+                                <p className="text-[10px] text-slate-400 mt-0.5 font-medium">Wants to connect with you</p>
+                                
+                                <div className="flex gap-1.5 mt-2.5">
+                                  <button
+                                    id={`bell-accept-${req.userId}`}
+                                    onClick={() => {
+                                      handleAcceptRequest(req.userId);
+                                      setShowRequestsDropdown(false);
+                                    }}
+                                    className="flex-1 bg-emerald-500 hover:bg-emerald-600 text-white font-extrabold text-[9px] uppercase tracking-wider py-1.5 rounded transition-all cursor-pointer text-center"
+                                  >
+                                    Accept
+                                  </button>
+                                  <button
+                                    id={`bell-decline-${req.userId}`}
+                                    onClick={() => {
+                                      handleDeclineRequest(req.userId);
+                                    }}
+                                    className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-600 font-extrabold text-[9px] uppercase tracking-wider py-1.5 rounded transition-all cursor-pointer text-center"
+                                  >
+                                    Decline
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+
+              <div className={`flex items-center gap-2 bg-slate-900/80 border border-slate-800 rounded-xl transition-all ${isScrolled && !isForceExpanded ? "px-2 py-1" : "px-3.5 py-1.5"}`}>
+                <img 
+                  src={avatarUrl} 
+                  alt="My Profile avatar" 
+                  className={`rounded bg-slate-950 object-contain transition-all ${isScrolled && !isForceExpanded ? "w-6 h-6" : "w-7 h-7"}`}
+                  referrerPolicy="no-referrer"
+                />
+                <div className={isScrolled && !isForceExpanded ? "hidden sm:block" : "block"}>
+                  {!(isScrolled && !isForceExpanded) && (
+                    <span className="text-[9px] font-bold text-slate-400 block uppercase tracking-wider leading-none">Logged In As</span>
+                  )}
+                  <span className={`font-black text-slate-100 block leading-none ${isScrolled && !isForceExpanded ? "text-xs" : "text-xs mt-1"}`}>
+                    {myProfile.name}
+                  </span>
+                </div>
+                <button
+                  onClick={() => {
+                    signOut(auth).then(() => {
+                      triggerAlert("Signed out successfully from Geochat workspace.", "info");
+                    });
+                  }}
+                  className={`bg-rose-500/20 hover:bg-rose-500/30 border border-rose-500/30 text-rose-400 hover:text-rose-300 transition-all font-bold text-[9px] uppercase tracking-wider rounded cursor-pointer ${isScrolled && !isForceExpanded ? "px-2 py-1 text-[8px]" : "px-2.5 py-1.5 ml-2"}`}
+                  title="Log Out"
+                >
+                  Log Out
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
       </header>
 
       {/* Main Content Sections */}
@@ -1837,67 +1970,159 @@ export default function App() {
                       Save Profile to Cloud
                     </button>
 
-                    {/* Theme Customization selection */}
-                    <div className="border-t border-[#E2E8F0] pt-4 mt-2 flex flex-col gap-3">
-                      <label className="text-[10px] font-bold text-[#64748B] uppercase tracking-wider flex items-center gap-1">
-                        <Palette className="w-3.5 h-3.5 text-indigo-600 animate-pulse" />
-                        Workspace Theme
+                    {/* PROFILE VISIBILITY */}
+                    <div className="border-t border-[#E2E8F0] pt-4 mt-2 flex flex-col gap-3" id="profile-visibility-section">
+                      <label className="text-[10px] font-bold text-[#64748B] uppercase tracking-wider flex items-center gap-1.5">
+                        <Shield className="w-3.5 h-3.5 text-indigo-600" />
+                        Profile Visibility
                       </label>
-                      
-                      <div className="grid grid-cols-2 gap-2">
-                        {PREDEFINED_THEMES.map(t => {
-                          const isSelected = customTheme.themeId === t.id;
-                          return (
-                            <button
-                              key={t.id}
-                              onClick={() => {
-                                setCustomTheme(prev => ({ ...prev, themeId: t.id, primaryColor: t.primary }));
-                                triggerAlert(`Theme switched to ${t.name}!`, "success");
-                              }}
-                              className={`p-2 rounded-lg border text-left text-[11px] font-bold transition-all flex flex-col gap-1 cursor-pointer ${
-                                isSelected 
-                                  ? "border-indigo-600 bg-indigo-50 text-indigo-950 shadow-sm" 
-                                  : "border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700"
-                              }`}
-                            >
-                              <span>{t.name}</span>
-                              <div className="flex gap-1 items-center">
-                                <span className="w-2.5 h-2.5 rounded-full border border-slate-300" style={{ backgroundColor: t.primary }}></span>
-                                <span className="text-[8px] text-[#64748B] font-medium uppercase">{t.id}</span>
-                              </div>
-                            </button>
-                          );
-                        })}
-                      </div>
+                      <p className="text-[11px] text-slate-500 leading-normal font-medium">
+                        Choose who can discover you and view your live location.
+                      </p>
 
-                      {/* Custom brand color picker and chat wallpaper input */}
-                      <div className="flex flex-col gap-2 mt-1">
-                        <div className="flex items-center justify-between">
-                          <span className="text-[9px] font-bold text-[#64748B] uppercase">Primary Accent:</span>
-                          <div className="flex items-center gap-1.5">
-                            <input
-                              type="color"
-                              value={customTheme.primaryColor}
-                              onChange={(e) => setCustomTheme(prev => ({ ...prev, primaryColor: e.target.value }))}
-                              className="w-5 h-5 rounded cursor-pointer border border-[#E2E8F0] p-0 bg-transparent"
-                            />
-                            <span className="text-[9px] font-mono text-slate-700 font-bold uppercase">{customTheme.primaryColor}</span>
+                      <div className="flex flex-col gap-2.5 mt-1">
+                        {/* Public option */}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setMyProfile(prev => ({ ...prev, visibility: "public" }));
+                            triggerAlert("Visibility set to Public Profile!", "success");
+                          }}
+                          className={`p-3 rounded-lg border text-left transition-all cursor-pointer flex flex-col gap-1.5 ${
+                            myProfile.visibility === "public"
+                              ? "border-blue-600 bg-blue-50 text-blue-950 shadow-sm"
+                              : "border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700"
+                          }`}
+                          id="btn-visibility-public"
+                        >
+                          <div className="flex items-center justify-between w-full">
+                            <span className="text-xs font-bold flex items-center gap-1.5">
+                              <Globe className="w-3.5 h-3.5 text-blue-600" />
+                              Public Profile
+                            </span>
+                            <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider ${
+                              myProfile.visibility === "public" ? "bg-blue-200 text-blue-800" : "bg-slate-200 text-slate-600"
+                            }`}>
+                              Active
+                            </span>
                           </div>
-                        </div>
+                          <div className="text-[10px] text-slate-600 leading-normal font-medium flex flex-col gap-1">
+                            <p><strong>Visibility:</strong> Public</p>
+                            <p>• Your profile can appear to all nearby users.</p>
+                            <p>• Your approximate location is visible to everyone within your selected radar radius.</p>
+                            <p>• Any nearby user can send you a friend request or start a conversation.</p>
+                            <p className="text-blue-700 font-semibold mt-0.5">• Best for meeting new people and expanding your network.</p>
+                          </div>
+                        </button>
 
-                        <div className="flex flex-col gap-1">
-                          <span className="text-[9px] font-bold text-[#64748B] uppercase">Custom Chat Wallpaper URL:</span>
-                          <input
-                            type="text"
-                            value={customTheme.chatWallpaper}
-                            onChange={(e) => setCustomTheme(prev => ({ ...prev, chatWallpaper: e.target.value }))}
-                            placeholder="https://images.unsplash.com/... or blank"
-                            className="bg-[#F8FAFC] border border-[#E2E8F0] rounded-lg px-2.5 py-1 text-[10px] font-bold text-[#1E293B] focus:outline-none focus:border-indigo-500 w-full"
-                          />
-                        </div>
+                        {/* Private option */}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setMyProfile(prev => ({ ...prev, visibility: "private" }));
+                            triggerAlert("Visibility set to Private Profile!", "success");
+                          }}
+                          className={`p-3 rounded-lg border text-left transition-all cursor-pointer flex flex-col gap-1.5 ${
+                            myProfile.visibility === "private"
+                              ? "border-amber-600 bg-amber-50 text-amber-950 shadow-sm"
+                              : "border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700"
+                          }`}
+                          id="btn-visibility-private"
+                        >
+                          <div className="flex items-center justify-between w-full">
+                            <span className="text-xs font-bold flex items-center gap-1.5">
+                              <Lock className="w-3.5 h-3.5 text-amber-600" />
+                              Private Profile
+                            </span>
+                            <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider ${
+                              myProfile.visibility === "private" ? "bg-amber-200 text-amber-800" : "bg-slate-200 text-slate-600"
+                            }`}>
+                              Active
+                            </span>
+                          </div>
+                          <div className="text-[10px] text-slate-600 leading-normal font-medium flex flex-col gap-1">
+                            <p><strong>Visibility:</strong> Private</p>
+                            <p>• Your profile and approximate location are visible only to your accepted friends.</p>
+                            <p>• Nearby users who are not your friends cannot discover you on the radar.</p>
+                          </div>
+                        </button>
                       </div>
                     </div>
 
+                  </div>
+                </div>
+
+                {/* 1B. Share Local Story / Status Panel */}
+                <div className="bg-white rounded-xl border border-[#E2E8F0] overflow-hidden flex flex-col shadow-sm" id="share-story-panel">
+                  <div className="bg-[#F1F5F9] px-4 py-3 border-b border-[#E2E8F0] text-xs font-bold uppercase tracking-wider text-[#64748B] flex items-center justify-between">
+                    <h3 className="text-xs font-extrabold uppercase tracking-wider text-[#64748B] flex items-center gap-1.5">
+                      <Camera className="w-3.5 h-3.5 text-pink-600 animate-pulse" />
+                      Share Local Story
+                    </h3>
+                    <span className="text-[10px] bg-pink-100 text-pink-800 font-bold px-2 py-0.5 rounded-full uppercase tracking-wider">Instagram style</span>
+                  </div>
+
+                  <div className="p-4 flex flex-col gap-3">
+                    <form onSubmit={handlePostStory} className="flex flex-col gap-3">
+                      <div className="flex flex-col gap-1">
+                        <label className="text-[10px] font-bold text-[#64748B] uppercase tracking-wider">Story Text Content</label>
+                        <textarea
+                          value={newStoryContent}
+                          onChange={(e) => setNewStoryContent(e.target.value.substring(0, 120))}
+                          placeholder="What's your story today? (Max 120 chars)"
+                          rows={2}
+                          className="bg-[#F8FAFC] border border-[#E2E8F0] rounded-lg px-2.5 py-1.5 text-xs font-semibold text-[#1E293B] focus:outline-none focus:border-pink-500 w-full resize-none"
+                          required
+                        />
+                        <span className="text-[8px] text-slate-400 font-bold text-right mt-0.5">
+                          {newStoryContent.length}/120
+                        </span>
+                      </div>
+
+                      {/* Story privacy selector */}
+                      <div className="flex flex-col gap-1">
+                        <label className="text-[10px] font-bold text-[#64748B] uppercase tracking-wider">Who can view this story?</label>
+                        <div className="grid grid-cols-2 gap-2 mt-1">
+                          <button
+                            type="button"
+                            onClick={() => setNewStoryType("public")}
+                            className={`py-1.5 px-2 rounded-lg text-[10px] font-bold flex items-center justify-center gap-1.5 border transition-all cursor-pointer ${
+                              newStoryType === "public"
+                                ? "bg-blue-600 border-blue-600 text-white shadow-sm"
+                                : "bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100"
+                            }`}
+                            id="btn-story-type-public"
+                          >
+                            <Globe className="w-3 h-3" />
+                            Public Story
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => setNewStoryType("private")}
+                            className={`py-1.5 px-2 rounded-lg text-[10px] font-bold flex items-center justify-center gap-1.5 border transition-all cursor-pointer ${
+                              newStoryType === "private"
+                                ? "bg-amber-600 border-amber-600 text-white shadow-sm"
+                                : "bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100"
+                            }`}
+                            id="btn-story-type-private"
+                          >
+                            <Lock className="w-3 h-3" />
+                            Private (Friends)
+                          </button>
+                        </div>
+                      </div>
+
+                      <button
+                        type="submit"
+                        disabled={isSubmittingStory || !newStoryContent.trim()}
+                        className="w-full py-2 px-3 rounded-lg bg-gradient-to-r from-pink-600 to-rose-600 hover:from-pink-700 hover:to-rose-700 text-white font-bold text-[10px] uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                        id="btn-post-story-submit"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        Share Story
+                      </button>
+                    </form>
                   </div>
                 </div>
 
@@ -2015,6 +2240,83 @@ export default function App() {
 
               {/* Middle Column: Interactive Locator Radar Map & Matched Connections (col-span-5) */}
               <div className="lg:col-span-5 flex flex-col gap-6" id="radar-column">
+                
+                {/* 2A. Instagram-like Stories Tray */}
+                <div className="bg-white rounded-xl border border-[#E2E8F0] p-4 flex flex-col gap-3 shadow-sm" id="stories-tray-panel">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-bold text-[#64748B] uppercase tracking-wider flex items-center gap-1.5">
+                      <Camera className="w-3.5 h-3.5 text-pink-600" />
+                      Nearby Stories Feed
+                    </span>
+                    <span className="text-[9px] bg-pink-100 text-pink-800 font-bold px-2 py-0.5 rounded-full uppercase tracking-wider">
+                      24h Expiring
+                    </span>
+                  </div>
+
+                  {visibleStories.length === 0 ? (
+                    <div className="text-center py-4 bg-slate-50 rounded-lg border border-dashed border-slate-200 text-slate-500 text-[11px] font-medium">
+                      No recent stories shared nearby. Be the first to share a story!
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-3.5 overflow-x-auto pb-1 scrollbar-thin scrollbar-thumb-slate-200 scrollbar-track-transparent">
+                      {/* Let's group stories by userId so that clicking shows their stories */}
+                      {(() => {
+                        // Group stories by userId, keeping order
+                        const groups: { [userId: string]: { userName: string; avatar: string; stories: Story[] } } = {};
+                        visibleStories.forEach(s => {
+                          if (!groups[s.userId]) {
+                            groups[s.userId] = {
+                              userName: s.userName,
+                              avatar: s.avatar,
+                              stories: []
+                            };
+                          }
+                          groups[s.userId].stories.push(s);
+                        });
+
+                        return Object.entries(groups).map(([userId, group]) => {
+                          const hasPrivateStory = group.stories.some(s => s.type === "private");
+                          const isOwn = userId === myProfile.id;
+                          return (
+                            <button
+                              key={userId}
+                              onClick={() => setActiveStoryGroup(group)}
+                              className="flex flex-col items-center gap-1 shrink-0 cursor-pointer focus:outline-none focus:ring-2 focus:ring-pink-500 focus:ring-offset-2 rounded-lg p-0.5"
+                              title={`View ${group.userName}'s stories`}
+                              id={`story-bubble-${userId}`}
+                            >
+                              <div className="relative">
+                                {/* Rainbow ring gradient like Instagram */}
+                                <div className={`w-12 h-12 sm:w-14 sm:h-14 rounded-full p-[2.5px] ${
+                                  hasPrivateStory 
+                                    ? "bg-gradient-to-tr from-amber-500 via-yellow-500 to-green-500" 
+                                    : "bg-gradient-to-tr from-yellow-500 via-pink-500 to-purple-600"
+                                }`}>
+                                  <div className="w-full h-full rounded-full bg-white p-[2px]">
+                                    <img 
+                                      src={group.avatar} 
+                                      alt={group.userName} 
+                                      className="w-full h-full rounded-full object-contain bg-slate-50"
+                                      referrerPolicy="no-referrer"
+                                    />
+                                  </div>
+                                </div>
+                                <span className={`absolute -bottom-1 -right-1 text-[8px] sm:text-[9px] px-1 rounded-full text-white font-bold border border-white ${
+                                  hasPrivateStory ? "bg-amber-600" : "bg-blue-600"
+                                }`}>
+                                  {group.stories.length}
+                                </span>
+                              </div>
+                              <span className="text-[10px] font-bold text-slate-700 truncate max-w-[65px]">
+                                {isOwn ? "Your Story" : group.userName}
+                              </span>
+                            </button>
+                          );
+                        });
+                      })()}
+                    </div>
+                  )}
+                </div>
                 
                 {/* Visual locator radar map schematic */}
                 <div className="bg-white rounded-xl border border-[#E2E8F0] overflow-hidden flex flex-col shadow-sm">
@@ -3092,6 +3394,109 @@ export default function App() {
                         </form>
                       </motion.div>
                     </div>
+                  )}
+                </AnimatePresence>
+
+                {/* STORIES SLIDESHOW MODAL */}
+                <AnimatePresence>
+                  {activeStoryGroup && (
+                    <motion.div
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      exit={{ opacity: 0 }}
+                      className="fixed inset-0 bg-slate-950/90 z-[999] flex items-center justify-center p-4 backdrop-blur-md"
+                      id="story-modal-overlay"
+                      onClick={() => setActiveStoryGroup(null)}
+                    >
+                      <motion.div
+                        initial={{ scale: 0.9, y: 20 }}
+                        animate={{ scale: 1, y: 0 }}
+                        exit={{ scale: 0.9, y: 20 }}
+                        transition={{ type: "spring", damping: 25, stiffness: 350 }}
+                        className="w-full max-w-sm bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-2xl relative flex flex-col h-[520px]"
+                        id="story-modal-content"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        {/* Progress bar indicator */}
+                        <div className="absolute top-3 left-4 right-4 flex gap-1 z-20">
+                          {activeStoryGroup.stories.map((s, index) => (
+                            <div key={s.id} className="h-1 flex-1 bg-slate-800 rounded-full overflow-hidden">
+                              <div className="h-full bg-pink-500 rounded-full w-full" />
+                            </div>
+                          ))}
+                        </div>
+
+                        {/* Author Info */}
+                        <div className="p-4 pt-6 flex items-center justify-between border-b border-slate-800 bg-slate-950/60 relative z-10">
+                          <div className="flex items-center gap-3">
+                            <img 
+                              src={activeStoryGroup.avatar} 
+                              alt={activeStoryGroup.userName} 
+                              className="w-10 h-10 rounded-full border border-slate-700 object-contain bg-slate-800"
+                              referrerPolicy="no-referrer"
+                            />
+                            <div>
+                              <h4 className="text-xs font-bold text-white flex items-center gap-1.5">
+                                {activeStoryGroup.userName}
+                                {activeStoryGroup.stories[0]?.userId === myProfile.id && (
+                                  <span className="text-[8px] bg-slate-800 text-slate-300 px-1.5 py-0.5 rounded font-mono">You</span>
+                                )}
+                              </h4>
+                              <p className="text-[9px] text-slate-400 font-medium">Shared in last 24h</p>
+                            </div>
+                          </div>
+
+                          <button 
+                            onClick={() => setActiveStoryGroup(null)}
+                            className="p-1.5 rounded-full hover:bg-slate-800 text-slate-400 hover:text-white transition-all cursor-pointer"
+                            id="btn-close-story-modal"
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
+                        </div>
+
+                        {/* Stories Content Slideshow List */}
+                        <div className="flex-1 overflow-y-auto p-6 flex flex-col justify-center bg-gradient-to-b from-slate-900 via-slate-950 to-slate-900">
+                          <div className="flex flex-col gap-4 text-center items-center">
+                            <div className="w-16 h-16 rounded-full bg-slate-800/80 border border-slate-700 flex items-center justify-center mb-2">
+                              <Camera className="w-8 h-8 text-pink-500 animate-pulse" />
+                            </div>
+                            
+                            {activeStoryGroup.stories.map((story, i) => (
+                              <div key={story.id} className="border-t border-slate-800/30 pt-4 first:border-0 first:pt-0 w-full flex flex-col items-center gap-2">
+                                {/* Story Privacy Indicator */}
+                                <div className="flex items-center gap-1">
+                                  {story.type === "private" ? (
+                                    <span className="text-[9px] font-bold text-amber-500 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-full flex items-center gap-1">
+                                      <Lock className="w-2.5 h-2.5" />
+                                      Friends Story
+                                    </span>
+                                  ) : (
+                                    <span className="text-[9px] font-bold text-blue-400 bg-blue-400/10 border border-blue-400/20 px-2 py-0.5 rounded-full flex items-center gap-1">
+                                      <Globe className="w-2.5 h-2.5" />
+                                      Public Story
+                                    </span>
+                                  )}
+                                  <span className="text-[9px] text-slate-500 font-medium font-mono">
+                                    • {new Date(story.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                  </span>
+                                </div>
+
+                                {/* Story Content Text */}
+                                <p className="text-sm font-bold text-white leading-relaxed text-center max-w-[280px] bg-slate-950/40 p-4 rounded-xl border border-slate-800/80 shadow-md">
+                                  "{story.content}"
+                                </p>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* Footer close help */}
+                        <div className="p-3 text-center border-t border-slate-800 text-[10px] text-slate-500 font-medium bg-slate-950/40">
+                          Click outside to close slideshow
+                        </div>
+                      </motion.div>
+                    </motion.div>
                   )}
                 </AnimatePresence>
 
