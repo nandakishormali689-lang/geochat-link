@@ -31,5 +31,10 @@ service cloud.firestore {
         allow read, write: if isAuthenticated();
       }
     }
+
+    // Stories collection rules
+    match /stories/{storyId} {
+      allow read, write: if isAuthenticated();
+    }
   }
 }

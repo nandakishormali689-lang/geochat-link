@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import { 
   Lock, Database, MessageSquare, Server, Globe, Image, PhoneCall, 
   Map, Compass, Bell, User, Cpu, Code, Trophy, Camera, Music, BookOpen, 
@@ -108,6 +108,16 @@ function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: numbe
   return Number(d.toFixed(1));
 }
 
+const STORY_PRESET_MEDIA = [
+  { name: "None", url: "", type: undefined },
+  { name: "Sunset Beach", url: "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&w=500&q=80", type: "image" },
+  { name: "Cyberpunk City", url: "https://images.unsplash.com/photo-1515621061946-eff1c2a352bd?auto=format&fit=crop&w=500&q=80", type: "image" },
+  { name: "Coffee Vibing", url: "https://images.unsplash.com/photo-1501339847302-ac426a4a7cbb?auto=format&fit=crop&w=500&q=80", type: "image" },
+  { name: "Neon Forest", url: "https://images.unsplash.com/photo-1509198397868-475647b2a1e5?auto=format&fit=crop&w=500&q=80", type: "image" },
+  { name: "Sunset Sea Video", url: "https://assets.mixkit.co/videos/preview/mixkit-sunset-over-the-sea-12711-large.mp4", type: "video" },
+  { name: "Cozy Rainfall Video", url: "https://assets.mixkit.co/videos/preview/mixkit-raindrops-on-a-window-at-night-42171-large.mp4", type: "video" }
+];
+
 export default function App() {
   // Scroll collapse states
   const [isScrolled, setIsScrolled] = useState(false);
@@ -203,12 +213,51 @@ export default function App() {
   const [nearbyPeople, setNearbyPeople] = useState<NearbyUser[]>([]);
   const [connectionsData, setConnectionsData] = useState<{ [userId: string]: { status: string; senderId: string; receiverId: string; connectionId: string } }>({});
   
-  // Instagram-like Stories state
+  // Instagram-like Stories state with local fallback & media uploads
   const [stories, setStories] = useState<Story[]>([]);
+  const [localStories, setLocalStories] = useState<Story[]>(() => {
+    try {
+      const saved = localStorage.getItem("geochat_local_stories");
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        const now = new Date().getTime();
+        // Keep only stories from the last 24 hours
+        return parsed.map((s: any) => ({
+          ...s,
+          timestamp: new Date(s.timestamp)
+        })).filter((s: Story) => (now - s.timestamp.getTime()) / (1000 * 60 * 60) < 24);
+      }
+    } catch (e) {}
+    return [];
+  });
+
+  useEffect(() => {
+    localStorage.setItem("geochat_local_stories", JSON.stringify(localStories));
+  }, [localStories]);
+
+  const mergedStories = useMemo(() => {
+    const all = [...stories, ...localStories];
+    const seen = new Set<string>();
+    const uniq: Story[] = [];
+    all.forEach(s => {
+      if (!seen.has(s.id)) {
+        seen.add(s.id);
+        uniq.push(s);
+      }
+    });
+    return uniq.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
+  }, [stories, localStories]);
+
   const [newStoryContent, setNewStoryContent] = useState("");
   const [newStoryType, setNewStoryType] = useState<"public" | "private">("public");
   const [isSubmittingStory, setIsSubmittingStory] = useState(false);
   const [activeStoryGroup, setActiveStoryGroup] = useState<{ userName: string; avatar: string; stories: Story[] } | null>(null);
+
+  // Story media file upload & preset states
+  const [storyMediaFile, setStoryMediaFile] = useState<File | null>(null);
+  const [storyMediaUrl, setStoryMediaUrl] = useState<string>("");
+  const [storyMediaType, setStoryMediaType] = useState<"image" | "video" | undefined>(undefined);
+  const [storyMediaPreview, setStoryMediaPreview] = useState<string>("");
   
   // Active Chat and Conversations
   const [activeChatId, setActiveChatId] = useState<string>("ai-assistant");
@@ -893,46 +942,82 @@ export default function App() {
     }
   };
 
-  // Post dynamic story/status to Firestore
+  // Post dynamic story/status to Firestore (with local fallback & media)
   const handlePostStory = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newStoryContent.trim() || !db || !myProfile.id) return;
+    if (!newStoryContent.trim() || !myProfile.id) return;
     setIsSubmittingStory(true);
+    
+    const avatarUrl = `https://api.dicebear.com/7.x/adventurer/svg?seed=${myProfile.avatarSeed}`;
+    const newStoryId = `story_${Math.random().toString(36).substring(2, 9)}`;
+    const now = new Date();
+    
+    const storyPayload: Story = {
+      id: newStoryId,
+      userId: myProfile.id,
+      userName: myProfile.name,
+      avatar: avatarUrl,
+      content: newStoryContent.trim(),
+      type: newStoryType,
+      timestamp: now,
+      latitude: myProfile.latitude || 37.7749,
+      longitude: myProfile.longitude || -122.4194,
+      mediaUrl: storyMediaUrl || undefined,
+      mediaType: storyMediaType || undefined
+    };
+
+    // 1. Instantly save to local fallback state so that it shows up for the user immediately!
+    setLocalStories(prev => [storyPayload, ...prev]);
+
+    // 2. Try to sync to Firestore
     try {
-      const avatarUrl = `https://api.dicebear.com/7.x/adventurer/svg?seed=${myProfile.avatarSeed}`;
-      await addDoc(collection(db, "stories"), {
-        userId: myProfile.id,
-        userName: myProfile.name,
-        avatar: avatarUrl,
-        content: newStoryContent.trim(),
-        type: newStoryType,
-        timestamp: serverTimestamp(),
-        latitude: myProfile.latitude || 37.7749,
-        longitude: myProfile.longitude || -122.4194
-      });
-      setNewStoryContent("");
-      triggerAlert(`Your ${newStoryType} story has been shared!`, "success");
+      if (db) {
+        await addDoc(collection(db, "stories"), {
+          userId: storyPayload.userId,
+          userName: storyPayload.userName,
+          avatar: storyPayload.avatar,
+          content: storyPayload.content,
+          type: storyPayload.type,
+          timestamp: serverTimestamp(),
+          latitude: storyPayload.latitude,
+          longitude: storyPayload.longitude,
+          mediaUrl: storyPayload.mediaUrl || null,
+          mediaType: storyPayload.mediaType || null
+        });
+        triggerAlert(`Your ${newStoryType} story was shared successfully on the radar!`, "success");
+      } else {
+        triggerAlert("Firestore not connected. Story saved in your local session!", "info");
+      }
     } catch (err) {
-      console.error("Failed to share story:", err);
-      triggerAlert("Failed to post story.", "error");
+      console.error("Failed to share story to Cloud Firestore:", err);
+      // Still show success-info since we have local storage fallback!
+      triggerAlert("Cloud database offline or permission restricted. Saved in local session!", "info");
     } finally {
+      // Clear inputs
+      setNewStoryContent("");
+      setStoryMediaFile(null);
+      setStoryMediaUrl("");
+      setStoryMediaType(undefined);
+      setStoryMediaPreview("");
       setIsSubmittingStory(false);
     }
   };
 
   // Filter visible stories based on location and friendship
-  const visibleStories = stories.filter(story => {
+  const visibleStories = mergedStories.filter(story => {
+    // Show own stories always
     if (story.userId === myProfile.id) return true;
 
-    // Check if friends
+    // Check friendship status
     const conn = connectionsData[story.userId];
     const isFriend = conn && conn.status === "accepted";
 
+    // Private stories are visible ONLY to accepted friends
     if (story.type === "private") {
       return isFriend;
     }
 
-    // Public story - visible if within radar radius
+    // Public stories are visible ONLY within the poster's local area (radar radius)
     const dist = calculateDistance(
       myProfile.latitude || 37.7749,
       myProfile.longitude || -122.4194,
@@ -2063,9 +2148,11 @@ export default function App() {
                   </div>
 
                   <div className="p-4 flex flex-col gap-3">
-                    <form onSubmit={handlePostStory} className="flex flex-col gap-3">
+                    <form onSubmit={handlePostStory} className="flex flex-col gap-3.5">
                       <div className="flex flex-col gap-1">
-                        <label className="text-[10px] font-bold text-[#64748B] uppercase tracking-wider">Story Text Content</label>
+                        <label className="text-[10px] font-bold text-[#64748B] uppercase tracking-wider flex items-center gap-1">
+                          <span>Story Text Content</span>
+                        </label>
                         <textarea
                           value={newStoryContent}
                           onChange={(e) => setNewStoryContent(e.target.value.substring(0, 120))}
@@ -2079,8 +2166,116 @@ export default function App() {
                         </span>
                       </div>
 
+                      {/* File Upload Area for Images and Videos */}
+                      <div className="flex flex-col gap-1.5">
+                        <label className="text-[10px] font-bold text-[#64748B] uppercase tracking-wider flex items-center gap-1">
+                          <Paperclip className="w-3 h-3 text-pink-500" />
+                          <span>Attach Image or Video</span>
+                        </label>
+                        
+                        <div className="flex items-center gap-2">
+                          <label className="flex-1 flex flex-col items-center justify-center border border-dashed border-slate-300 rounded-lg p-3 hover:bg-slate-50 transition-all cursor-pointer group text-center">
+                            <Plus className="w-4 h-4 text-slate-400 group-hover:text-pink-500 transition-colors" />
+                            <span className="text-[10px] font-bold text-slate-500 group-hover:text-pink-600 transition-colors mt-1">Upload File</span>
+                            <span className="text-[8px] text-slate-400 font-medium">Image or Video max 2MB</span>
+                            <input
+                              type="file"
+                              accept="image/*,video/*"
+                              className="hidden"
+                              onChange={(e) => {
+                                const file = e.target.files?.[0];
+                                if (!file) return;
+                                const isVideo = file.type.startsWith("video/");
+                                const isImg = file.type.startsWith("image/");
+                                if (!isVideo && !isImg) {
+                                  triggerAlert("Please select an image or video file.", "error");
+                                  return;
+                                }
+                                setStoryMediaFile(file);
+                                setStoryMediaType(isVideo ? "video" : "image");
+                                const previewUrl = URL.createObjectURL(file);
+                                setStoryMediaPreview(previewUrl);
+                                
+                                if (file.size <= 2 * 1024 * 1024) {
+                                  const reader = new FileReader();
+                                  reader.onloadend = () => {
+                                    setStoryMediaUrl(reader.result as string);
+                                  };
+                                  reader.readAsDataURL(file);
+                                } else {
+                                  setStoryMediaUrl(previewUrl);
+                                }
+                                triggerAlert(`${file.name} attached successfully!`, "success");
+                              }}
+                            />
+                          </label>
+
+                          {/* Quick Unsplash / Mixkit Media Presets */}
+                          <div className="flex-1 flex flex-col gap-1">
+                            <span className="text-[8px] font-bold text-slate-400 uppercase tracking-wider">Presets:</span>
+                            <div className="grid grid-cols-2 gap-1">
+                              {STORY_PRESET_MEDIA.slice(1, 5).map((p) => (
+                                <button
+                                  key={p.name}
+                                  type="button"
+                                  onClick={() => {
+                                    setStoryMediaUrl(p.url);
+                                    setStoryMediaType(p.type as any);
+                                    setStoryMediaPreview(p.url);
+                                    triggerAlert(`Preset "${p.name}" selected!`, "success");
+                                  }}
+                                  className="py-1 px-1.5 border border-slate-200 hover:border-pink-300 rounded text-[9px] font-bold text-slate-600 bg-slate-50 hover:bg-pink-50 transition-all truncate text-left"
+                                  title={p.name}
+                                >
+                                  {p.name}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Media Preview Window */}
+                        {storyMediaPreview && (
+                          <div className="relative mt-2 rounded-lg border border-slate-200 overflow-hidden bg-slate-50 max-h-40 flex items-center justify-center p-1 group">
+                            {storyMediaType === "video" ? (
+                              <video
+                                src={storyMediaPreview}
+                                className="max-h-36 max-w-full rounded object-contain"
+                                controls
+                                muted
+                                playsInline
+                              />
+                            ) : (
+                              <img
+                                src={storyMediaPreview}
+                                alt="Preview"
+                                className="max-h-36 max-w-full rounded object-contain"
+                                referrerPolicy="no-referrer"
+                              />
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setStoryMediaFile(null);
+                                setStoryMediaUrl("");
+                                setStoryMediaType(undefined);
+                                setStoryMediaPreview("");
+                                triggerAlert("Media attachment removed", "info");
+                              }}
+                              className="absolute top-1 right-1 p-1 bg-rose-600 hover:bg-rose-700 text-white rounded-full shadow-md transition-colors cursor-pointer"
+                              title="Remove media"
+                            >
+                              <X className="w-3 h-3" />
+                            </button>
+                            <span className="absolute bottom-1 left-1 px-1.5 py-0.5 rounded bg-black/60 text-white font-mono text-[8px] uppercase">
+                              {storyMediaType} attachment
+                            </span>
+                          </div>
+                        )}
+                      </div>
+
                       {/* Story privacy selector */}
-                      <div className="flex flex-col gap-1">
+                      <div className="flex flex-col gap-1 mt-1">
                         <label className="text-[10px] font-bold text-[#64748B] uppercase tracking-wider">Who can view this story?</label>
                         <div className="grid grid-cols-2 gap-2 mt-1">
                           <button
@@ -2110,6 +2305,20 @@ export default function App() {
                             <Lock className="w-3 h-3" />
                             Private (Friends)
                           </button>
+                        </div>
+                        
+                        <div className="mt-1 bg-slate-50 border border-slate-100 rounded-lg p-2 text-[9px] text-slate-500 leading-normal font-medium">
+                          {newStoryType === "public" ? (
+                            <p className="flex items-start gap-1">
+                              <Globe className="w-3 h-3 text-blue-500 shrink-0 mt-0.5" />
+                              <span><strong>Public Scope:</strong> Broadcasted only to users located within your <strong>{searchRadius} km</strong> radar area.</span>
+                            </p>
+                          ) : (
+                            <p className="flex items-start gap-1">
+                              <Lock className="w-3 h-3 text-amber-500 shrink-0 mt-0.5" />
+                              <span><strong>Private Scope:</strong> Securely shared <strong>only with your accepted friends</strong>. Non-friends won't see it on their radar feed.</span>
+                            </p>
+                          )}
                         </div>
                       </div>
 
@@ -3486,6 +3695,30 @@ export default function App() {
                                 <p className="text-sm font-bold text-white leading-relaxed text-center max-w-[280px] bg-slate-950/40 p-4 rounded-xl border border-slate-800/80 shadow-md">
                                   "{story.content}"
                                 </p>
+
+                                {/* Media Attachment in Slideshow */}
+                                {story.mediaUrl && (
+                                  <div className="w-full max-w-[280px] rounded-xl overflow-hidden border border-slate-800/85 bg-black/60 mt-1.5 shadow-lg">
+                                    {story.mediaType === "video" ? (
+                                      <video
+                                        src={story.mediaUrl}
+                                        className="w-full h-auto max-h-44 object-contain mx-auto"
+                                        controls
+                                        autoPlay
+                                        muted
+                                        loop
+                                        playsInline
+                                      />
+                                    ) : (
+                                      <img
+                                        src={story.mediaUrl}
+                                        alt="Story attachment"
+                                        className="w-full h-auto max-h-44 object-contain mx-auto"
+                                        referrerPolicy="no-referrer"
+                                      />
+                                    )}
+                                  </div>
+                                )}
                               </div>
                             ))}
                           </div>

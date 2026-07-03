@@ -65,4 +65,6 @@ export interface Story {
   timestamp: Date;
   latitude: number;
   longitude: number;
+  mediaUrl?: string;
+  mediaType?: "image" | "video";
 }
