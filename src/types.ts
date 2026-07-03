@@ -61,10 +61,11 @@ export interface Story {
   userName: string;
   avatar: string;
   content: string;
-  type: "public" | "private";
+  type: "public" | "friends" | "close_friends";
   timestamp: Date;
   latitude: number;
   longitude: number;
   mediaUrl?: string;
   mediaType?: "image" | "video";
+  closeFriendIds?: string[];
 }

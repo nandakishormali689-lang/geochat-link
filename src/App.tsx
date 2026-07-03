@@ -4,7 +4,8 @@ import {
   Map, Compass, Bell, User, Cpu, Code, Trophy, Camera, Music, BookOpen, 
   Send, Shield, CheckCircle, Copy, Check, Users, MessageCircle, AlertCircle, 
   Volume2, Video, PhoneOff, MicOff, Mic, Smile, Paperclip, Trash2, Languages,
-  ChevronRight, Sparkles, Play, Square, Info, RefreshCw, X, Palette, Clock, Film, Plus
+  ChevronRight, Sparkles, Play, Square, Info, RefreshCw, X, Palette, Clock, Film, Plus,
+  Star, ChevronLeft, Pause
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { StackFeature, ChatMessage, NearbyUser, CallState, Story } from "./types";
@@ -235,8 +236,30 @@ export default function App() {
     localStorage.setItem("geochat_local_stories", JSON.stringify(localStories));
   }, [localStories]);
 
-  // Demo simulator mode state: allow posting stories as myself or other nearby users/friends
-  const [postStoryAsId, setPostStoryAsId] = useState<string>("myself");
+  // Close Friends system state
+  const [closeFriendIds, setCloseFriendIds] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem("geochat_close_friend_ids");
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const toggleCloseFriend = (userId: string) => {
+    setCloseFriendIds((prev) => {
+      let updated;
+      if (prev.includes(userId)) {
+        updated = prev.filter(id => id !== userId);
+        triggerAlert("Removed from Close Friends list", "info");
+      } else {
+        updated = [...prev, userId];
+        triggerAlert("Added to Close Friends list", "success");
+      }
+      localStorage.setItem("geochat_close_friend_ids", JSON.stringify(updated));
+      return updated;
+    });
+  };
 
   const mergedStories = useMemo(() => {
     const all = [...stories, ...localStories];
@@ -274,7 +297,7 @@ export default function App() {
         const latOffset = (Math.cos(angle) * person.distance) / 111.0;
         const lonOffset = (Math.sin(angle) * person.distance) / 111.0;
 
-        const storyType = person.status === "accepted" ? "private" : "public";
+        const storyType = person.status === "accepted" ? "friends" : "public";
 
         all.push({
           id: `sim_story_${person.id}`,
@@ -304,9 +327,31 @@ export default function App() {
   }, [stories, localStories, nearbyPeople, myProfile.latitude, myProfile.longitude]);
 
   const [newStoryContent, setNewStoryContent] = useState("");
-  const [newStoryType, setNewStoryType] = useState<"public" | "private">("public");
+  const [newStoryType, setNewStoryType] = useState<"public" | "friends" | "close_friends">("public");
   const [isSubmittingStory, setIsSubmittingStory] = useState(false);
   const [activeStoryGroup, setActiveStoryGroup] = useState<{ userName: string; avatar: string; stories: Story[] } | null>(null);
+  const [currentStoryIndex, setCurrentStoryIndex] = useState(0);
+  const [isStoryPaused, setIsStoryPaused] = useState(false);
+
+  // Auto-advance timer for Instagram-style story viewer
+  useEffect(() => {
+    if (!activeStoryGroup || isStoryPaused) return;
+    const total = activeStoryGroup.stories.length;
+    if (total <= 0) return;
+
+    const interval = setInterval(() => {
+      setCurrentStoryIndex((prev) => {
+        if (prev + 1 < total) {
+          return prev + 1;
+        } else {
+          setActiveStoryGroup(null);
+          return 0;
+        }
+      });
+    }, 5000);
+
+    return () => clearInterval(interval);
+  }, [activeStoryGroup, isStoryPaused]);
 
   // Story media file upload & preset states
   const [storyMediaFile, setStoryMediaFile] = useState<File | null>(null);
@@ -999,6 +1044,49 @@ export default function App() {
     }
   };
 
+  // Delete a story shared by the current user
+  const handleDeleteStory = async (storyId: string) => {
+    if (!storyId) return;
+
+    // 1. Remove from localStories state
+    setLocalStories(prev => prev.filter(s => s.id !== storyId));
+    // 2. Remove from stories state (if populated from Firestore)
+    setStories(prev => prev.filter(s => s.id !== storyId));
+
+    try {
+      if (db) {
+        // Try deleting by document ID directly (id is doc.id)
+        await deleteDoc(doc(db, "stories", storyId));
+        
+        // Also query to make sure if it was saved with a custom id field
+        const q = query(collection(db, "stories"), where("id", "==", storyId));
+        const querySnapshot = await getDocs(q);
+        const deletePromises = querySnapshot.docs.map(docSnap => deleteDoc(doc(db, "stories", docSnap.id)));
+        await Promise.all(deletePromises);
+      }
+      triggerAlert("Story deleted successfully!", "success");
+    } catch (err) {
+      console.error("Failed to delete story from Firestore:", err);
+      triggerAlert("Removed story from local view!", "info");
+    }
+
+    // Adjust activeStoryGroup or close it if no stories remain
+    if (activeStoryGroup) {
+      const updatedStories = activeStoryGroup.stories.filter(s => s.id !== storyId);
+      if (updatedStories.length > 0) {
+        // Adjust current active story index
+        const nextIndex = Math.min(currentStoryIndex, updatedStories.length - 1);
+        setCurrentStoryIndex(nextIndex);
+        setActiveStoryGroup({
+          ...activeStoryGroup,
+          stories: updatedStories
+        });
+      } else {
+        setActiveStoryGroup(null);
+      }
+    }
+  };
+
   // Post dynamic story/status to Firestore (with local fallback & media)
   const handlePostStory = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1009,29 +1097,11 @@ export default function App() {
     const newStoryId = `story_${Math.random().toString(36).substring(2, 9)}`;
     const now = new Date();
 
-    let userId = myProfile.id;
-    let userName = myProfile.name;
-    let avatar = avatarUrl;
-    let latitude = myProfile.latitude || 37.7749;
-    let longitude = myProfile.longitude || -122.4194;
-
-    if (postStoryAsId !== "myself") {
-      const targetUser = nearbyPeople.find(p => p.id === postStoryAsId);
-      if (targetUser) {
-        userId = targetUser.id;
-        userName = targetUser.name;
-        avatar = targetUser.avatar;
-        
-        // Find their coordinates based on their actual distance and deterministic angles
-        const idx = nearbyPeople.indexOf(targetUser);
-        const angles = [35, 140, 210, 290, 325];
-        const angle = angles[idx % angles.length] * (Math.PI / 180);
-        const latOffset = (Math.cos(angle) * targetUser.distance) / 111.0;
-        const lonOffset = (Math.sin(angle) * targetUser.distance) / 111.0;
-        latitude = (myProfile.latitude || 37.7749) + latOffset;
-        longitude = (myProfile.longitude || -122.4194) + lonOffset;
-      }
-    }
+    const userId = myProfile.id;
+    const userName = myProfile.name;
+    const avatar = avatarUrl;
+    const latitude = myProfile.latitude || 37.7749;
+    const longitude = myProfile.longitude || -122.4194;
     
     const storyPayload: Story = {
       id: newStoryId,
@@ -1044,7 +1114,8 @@ export default function App() {
       latitude: latitude,
       longitude: longitude,
       mediaUrl: storyMediaUrl || undefined,
-      mediaType: storyMediaType || undefined
+      mediaType: storyMediaType || undefined,
+      closeFriendIds: newStoryType === "close_friends" ? closeFriendIds : undefined
     };
 
     // 1. Instantly save to local fallback state so that it shows up for the user immediately!
@@ -1063,16 +1134,17 @@ export default function App() {
           latitude: storyPayload.latitude,
           longitude: storyPayload.longitude,
           mediaUrl: storyPayload.mediaUrl || null,
-          mediaType: storyPayload.mediaType || null
+          mediaType: storyPayload.mediaType || null,
+          closeFriendIds: storyPayload.closeFriendIds || null
         });
-        triggerAlert(`Story was shared successfully as "${storyPayload.userName}" on the radar!`, "success");
+        triggerAlert("Story was shared successfully!", "success");
       } else {
         triggerAlert("Firestore not connected. Story saved in your local session!", "info");
       }
     } catch (err) {
       console.error("Failed to share story to Cloud Firestore:", err);
       // Still show success-info since we have local storage fallback!
-      triggerAlert("Cloud database offline or permission restricted. Saved in local session!", "info");
+      triggerAlert("Cloud database offline. Saved in local session!", "info");
     } finally {
       // Clear inputs
       setNewStoryContent("");
@@ -1093,12 +1165,22 @@ export default function App() {
     const conn = connectionsData[story.userId];
     const isFriend = conn && conn.status === "accepted";
 
-    // Private stories are visible ONLY to accepted friends
-    if (story.type === "private") {
+    // 1. Close Friends Stories
+    if (story.type === "close_friends") {
+      // If designated via array, we must be in it
+      if (story.closeFriendIds && Array.isArray(story.closeFriendIds)) {
+        return story.closeFriendIds.includes(myProfile.id);
+      }
+      // Symmetrical simulation fallback (they are a friend and we have marked them as Close Friend)
+      return isFriend && closeFriendIds.includes(story.userId);
+    }
+
+    // 2. Friends Stories (including backward-compatible "private" type)
+    if (story.type === "friends" || (story.type as string) === "private") {
       return isFriend;
     }
 
-    // Public stories are visible ONLY within the poster's local area (radar radius)
+    // 3. Public stories are visible ONLY within the poster's local area (radar radius)
     const dist = calculateDistance(
       myProfile.latitude || 37.7749,
       myProfile.longitude || -122.4194,
@@ -2231,35 +2313,6 @@ export default function App() {
                   <div className="p-4 flex flex-col gap-3">
                     <form onSubmit={handlePostStory} className="flex flex-col gap-3.5">
                       
-                      {/* Demo Simulator Mode: Post Story As */}
-                      <div className="flex flex-col gap-1.5 p-2 bg-gradient-to-r from-pink-50 to-indigo-50 border border-pink-100 rounded-lg">
-                        <label className="text-[10px] font-bold text-pink-700 uppercase tracking-wider flex items-center justify-between">
-                          <span className="flex items-center gap-1">
-                            <Sparkles className="w-3.5 h-3.5 text-pink-500 animate-spin" style={{ animationDuration: '3s' }} />
-                            <span>Demo Posting Identity (Post As)</span>
-                          </span>
-                          <span className="text-[8px] bg-pink-200 text-pink-800 font-extrabold px-1.5 py-0.5 rounded uppercase">SIMULATOR</span>
-                        </label>
-                        <select
-                          value={postStoryAsId}
-                          onChange={(e) => {
-                            setPostStoryAsId(e.target.value);
-                            triggerAlert(`Demo posting mode switched to: ${e.target.value === "myself" ? "Myself" : nearbyPeople.find(p => p.id === e.target.value)?.name}`, "info");
-                          }}
-                          className="bg-white border border-pink-200 hover:border-pink-300 rounded-md px-2 py-1 text-xs font-bold text-slate-700 focus:outline-none focus:ring-1 focus:ring-pink-400 cursor-pointer"
-                        >
-                          <option value="myself">Myself ({myProfile.name || "Default User"})</option>
-                          {nearbyPeople.map((person) => (
-                            <option key={person.id} value={person.id}>
-                              {person.name} ({person.distance.toFixed(1)} km away • {person.status === "accepted" ? "Friend" : "Nearby"})
-                            </option>
-                          ))}
-                        </select>
-                        <p className="text-[8px] text-pink-600/80 font-medium leading-relaxed">
-                          Test radar filtering! Post as a nearby user to see their story on your feed instantly, or as a private friend to test secured friendship access.
-                        </p>
-                      </div>
-
                       <div className="flex flex-col gap-1">
                         <label className="text-[10px] font-bold text-[#64748B] uppercase tracking-wider flex items-center gap-1">
                           <span>Story Text Content</span>
@@ -2388,46 +2441,67 @@ export default function App() {
                       {/* Story privacy selector */}
                       <div className="flex flex-col gap-1 mt-1">
                         <label className="text-[10px] font-bold text-[#64748B] uppercase tracking-wider">Who can view this story?</label>
-                        <div className="grid grid-cols-2 gap-2 mt-1">
+                        <div className="grid grid-cols-3 gap-1.5 mt-1">
                           <button
                             type="button"
                             onClick={() => setNewStoryType("public")}
-                            className={`py-1.5 px-2 rounded-lg text-[10px] font-bold flex items-center justify-center gap-1.5 border transition-all cursor-pointer ${
+                            className={`py-1.5 px-1.5 rounded-lg text-[9px] font-bold flex items-center justify-center gap-1 border transition-all cursor-pointer ${
                               newStoryType === "public"
                                 ? "bg-blue-600 border-blue-600 text-white shadow-sm"
                                 : "bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100"
                             }`}
                             id="btn-story-type-public"
                           >
-                            <Globe className="w-3 h-3" />
-                            Public Story
+                            <Globe className="w-2.5 h-2.5" />
+                            Public
                           </button>
 
                           <button
                             type="button"
-                            onClick={() => setNewStoryType("private")}
-                            className={`py-1.5 px-2 rounded-lg text-[10px] font-bold flex items-center justify-center gap-1.5 border transition-all cursor-pointer ${
-                              newStoryType === "private"
+                            onClick={() => setNewStoryType("friends")}
+                            className={`py-1.5 px-1.5 rounded-lg text-[9px] font-bold flex items-center justify-center gap-1 border transition-all cursor-pointer ${
+                              newStoryType === "friends"
                                 ? "bg-amber-600 border-amber-600 text-white shadow-sm"
                                 : "bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100"
                             }`}
-                            id="btn-story-type-private"
+                            id="btn-story-type-friends"
                           >
-                            <Lock className="w-3 h-3" />
-                            Private (Friends)
+                            <Users className="w-2.5 h-2.5" />
+                            Friends
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => setNewStoryType("close_friends")}
+                            className={`py-1.5 px-1.5 rounded-lg text-[9px] font-bold flex items-center justify-center gap-1 border transition-all cursor-pointer ${
+                              newStoryType === "close_friends"
+                                ? "bg-emerald-600 border-emerald-600 text-white shadow-sm"
+                                : "bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100"
+                            }`}
+                            id="btn-story-type-close-friends"
+                          >
+                            <Star className="w-2.5 h-2.5" />
+                            Close Friends
                           </button>
                         </div>
                         
                         <div className="mt-1 bg-slate-50 border border-slate-100 rounded-lg p-2 text-[9px] text-slate-500 leading-normal font-medium">
-                          {newStoryType === "public" ? (
+                          {newStoryType === "public" && (
                             <p className="flex items-start gap-1">
                               <Globe className="w-3 h-3 text-blue-500 shrink-0 mt-0.5" />
                               <span><strong>Public Scope:</strong> Broadcasted only to users located within your <strong>{searchRadius} km</strong> radar area.</span>
                             </p>
-                          ) : (
+                          )}
+                          {newStoryType === "friends" && (
                             <p className="flex items-start gap-1">
-                              <Lock className="w-3 h-3 text-amber-500 shrink-0 mt-0.5" />
-                              <span><strong>Private Scope:</strong> Securely shared <strong>only with your accepted friends</strong>. Non-friends won't see it on their radar feed.</span>
+                              <Users className="w-3 h-3 text-amber-500 shrink-0 mt-0.5" />
+                              <span><strong>Friends Scope:</strong> Securely shared <strong>only with your accepted friends</strong>. Non-friends won't see it on their radar feed.</span>
+                            </p>
+                          )}
+                          {newStoryType === "close_friends" && (
+                            <p className="flex items-start gap-1">
+                              <Star className="w-3 h-3 text-emerald-500 shrink-0 mt-0.5 fill-emerald-500" />
+                              <span><strong>Close Friends Scope:</strong> Restricts viewing **only to friends** whom you have specifically starred in your Nearby People list.</span>
                             </p>
                           )}
                         </div>
@@ -2595,22 +2669,29 @@ export default function App() {
                         });
 
                         return Object.entries(groups).map(([userId, group]) => {
-                          const hasPrivateStory = group.stories.some(s => s.type === "private");
+                          const hasCloseFriendsStory = group.stories.some(s => s.type === "close_friends");
+                          const hasPrivateStory = group.stories.some(s => s.type === "friends" || (s.type as string) === "private");
                           const isOwn = userId === myProfile.id;
                           return (
                             <button
                               key={userId}
-                              onClick={() => setActiveStoryGroup(group)}
+                              onClick={() => {
+                                setCurrentStoryIndex(0);
+                                setIsStoryPaused(false);
+                                setActiveStoryGroup(group);
+                              }}
                               className="flex flex-col items-center gap-1 shrink-0 cursor-pointer focus:outline-none focus:ring-2 focus:ring-pink-500 focus:ring-offset-2 rounded-lg p-0.5"
                               title={`View ${group.userName}'s stories`}
                               id={`story-bubble-${userId}`}
                             >
                               <div className="relative">
-                                {/* Rainbow ring gradient like Instagram */}
+                                {/* Beautiful color-coded rings based on story privacy */}
                                 <div className={`w-12 h-12 sm:w-14 sm:h-14 rounded-full p-[2.5px] ${
-                                  hasPrivateStory 
-                                    ? "bg-gradient-to-tr from-amber-500 via-yellow-500 to-green-500" 
-                                    : "bg-gradient-to-tr from-yellow-500 via-pink-500 to-purple-600"
+                                  hasCloseFriendsStory
+                                    ? "bg-gradient-to-tr from-green-400 via-emerald-500 to-teal-600"
+                                    : hasPrivateStory 
+                                      ? "bg-gradient-to-tr from-amber-500 via-orange-500 to-yellow-500" 
+                                      : "bg-gradient-to-tr from-yellow-500 via-pink-500 to-purple-600"
                                 }`}>
                                   <div className="w-full h-full rounded-full bg-white p-[2px]">
                                     <img 
@@ -2621,8 +2702,12 @@ export default function App() {
                                     />
                                   </div>
                                 </div>
-                                <span className={`absolute -bottom-1 -right-1 text-[8px] sm:text-[9px] px-1 rounded-full text-white font-bold border border-white ${
-                                  hasPrivateStory ? "bg-amber-600" : "bg-blue-600"
+                                <span className={`absolute -bottom-1 -right-1 text-[8px] sm:text-[9px] px-1.5 py-0.5 rounded-full text-white font-extrabold border border-white ${
+                                  hasCloseFriendsStory 
+                                    ? "bg-emerald-600" 
+                                    : hasPrivateStory 
+                                      ? "bg-amber-600" 
+                                      : "bg-blue-600"
                                 }`}>
                                   {group.stories.length}
                                 </span>
@@ -2868,20 +2953,34 @@ export default function App() {
                                 </button>
                               )}
                               {person.status === "accepted" && (
-                                <button
-                                  id={`btn-chat-with-${person.id}`}
-                                  onClick={() => {
-                                    setActiveChatId(person.id);
-                                    triggerAlert(`Opened chat with ${person.name}`, "success");
-                                  }}
-                                  className={`font-bold py-1.5 px-3 rounded text-[10px] uppercase tracking-wider transition-all ${
-                                    activeChatId === person.id 
-                                      ? "bg-[#1E293B] text-white" 
-                                      : "bg-[#F1F5F9] text-[#475569] hover:bg-[#E2E8F0]"
-                                  }`}
-                                >
-                                  Chat Open
-                                </button>
+                                <div className="flex gap-1.5 items-center">
+                                  <button
+                                    id={`btn-chat-with-${person.id}`}
+                                    onClick={() => {
+                                      setActiveChatId(person.id);
+                                      triggerAlert(`Opened chat with ${person.name}`, "success");
+                                    }}
+                                    className={`font-bold py-1.5 px-3 rounded text-[10px] uppercase tracking-wider transition-all flex-1 ${
+                                      activeChatId === person.id 
+                                        ? "bg-[#1E293B] text-white" 
+                                        : "bg-[#F1F5F9] text-[#475569] hover:bg-[#E2E8F0]"
+                                    }`}
+                                  >
+                                    Chat Open
+                                  </button>
+                                  <button
+                                    id={`btn-toggle-close-friend-${person.id}`}
+                                    onClick={() => toggleCloseFriend(person.id)}
+                                    className={`p-1.5 rounded border transition-all flex items-center justify-center cursor-pointer ${
+                                      closeFriendIds.includes(person.id)
+                                        ? "bg-emerald-100 hover:bg-emerald-200 text-emerald-700 border-emerald-300 shadow-sm"
+                                        : "bg-slate-50 hover:bg-slate-100 text-slate-400 border-slate-200"
+                                    }`}
+                                    title={closeFriendIds.includes(person.id) ? "Close Friend (Starred)" : "Add to Close Friends"}
+                                  >
+                                    <Star className={`w-3.5 h-3.5 ${closeFriendIds.includes(person.id) ? "fill-emerald-500 text-emerald-600 animate-pulse" : "text-slate-400"}`} />
+                                  </button>
+                                </div>
                               )}
                             </div>
                           </div>
@@ -3739,11 +3838,23 @@ export default function App() {
                       >
                         {/* Progress bar indicator */}
                         <div className="absolute top-3 left-4 right-4 flex gap-1 z-20">
-                          {activeStoryGroup.stories.map((s, index) => (
-                            <div key={s.id} className="h-1 flex-1 bg-slate-800 rounded-full overflow-hidden">
-                              <div className="h-full bg-pink-500 rounded-full w-full" />
-                            </div>
-                          ))}
+                          {activeStoryGroup.stories.map((s, index) => {
+                            const isPast = index < currentStoryIndex;
+                            const isActive = index === currentStoryIndex;
+                            return (
+                              <div key={s.id} className="h-1 flex-1 bg-slate-800 rounded-full overflow-hidden">
+                                <div 
+                                  className={`h-full rounded-full transition-all duration-300 ${
+                                    isPast 
+                                      ? "w-full bg-pink-500" 
+                                      : isActive 
+                                        ? "w-full bg-pink-500 animate-pulse" 
+                                        : "w-0 bg-slate-850"
+                                  }`} 
+                                />
+                              </div>
+                            );
+                          })}
                         </div>
 
                         {/* Author Info */}
@@ -3758,80 +3869,147 @@ export default function App() {
                             <div>
                               <h4 className="text-xs font-bold text-white flex items-center gap-1.5">
                                 {activeStoryGroup.userName}
-                                {activeStoryGroup.stories[0]?.userId === myProfile.id && (
+                                {activeStoryGroup.stories[currentStoryIndex]?.userId === myProfile.id && (
                                   <span className="text-[8px] bg-slate-800 text-slate-300 px-1.5 py-0.5 rounded font-mono">You</span>
                                 )}
                               </h4>
-                              <p className="text-[9px] text-slate-400 font-medium">Shared in last 24h</p>
+                              <p className="text-[9px] text-slate-400 font-medium">
+                                Story {currentStoryIndex + 1} of {activeStoryGroup.stories.length}
+                              </p>
                             </div>
                           </div>
 
-                          <button 
-                            onClick={() => setActiveStoryGroup(null)}
-                            className="p-1.5 rounded-full hover:bg-slate-800 text-slate-400 hover:text-white transition-all cursor-pointer"
-                            id="btn-close-story-modal"
-                          >
-                            <X className="w-4 h-4" />
-                          </button>
+                          <div className="flex items-center gap-1.5">
+                            {/* Play/Pause control to stop/start the slideshow */}
+                            <button
+                              onClick={() => {
+                                setIsStoryPaused(!isStoryPaused);
+                                triggerAlert(isStoryPaused ? "Story slideshow resumed" : "Story slideshow paused", "info");
+                              }}
+                              className={`p-1.5 rounded-full hover:bg-slate-800 transition-all cursor-pointer ${
+                                isStoryPaused ? "text-emerald-400 hover:text-emerald-355" : "text-slate-400 hover:text-white"
+                              }`}
+                              title={isStoryPaused ? "Resume slideshow" : "Pause / Stop slideshow"}
+                            >
+                              {isStoryPaused ? <Play className="w-4 h-4 fill-emerald-400 text-emerald-400" /> : <Pause className="w-4 h-4" />}
+                            </button>
+
+                            <button 
+                              onClick={() => setActiveStoryGroup(null)}
+                              className="p-1.5 rounded-full hover:bg-slate-800 text-slate-400 hover:text-white transition-all cursor-pointer"
+                              id="btn-close-story-modal"
+                            >
+                              <X className="w-4 h-4" />
+                            </button>
+                          </div>
                         </div>
 
                         {/* Stories Content Slideshow List */}
-                        <div className="flex-1 overflow-y-auto p-6 flex flex-col justify-center bg-gradient-to-b from-slate-900 via-slate-950 to-slate-900">
-                          <div className="flex flex-col gap-4 text-center items-center">
-                            <div className="w-16 h-16 rounded-full bg-slate-800/80 border border-slate-700 flex items-center justify-center mb-2">
-                              <Camera className="w-8 h-8 text-pink-500 animate-pulse" />
-                            </div>
-                            
-                            {activeStoryGroup.stories.map((story, i) => (
-                              <div key={story.id} className="border-t border-slate-800/30 pt-4 first:border-0 first:pt-0 w-full flex flex-col items-center gap-2">
-                                {/* Story Privacy Indicator */}
-                                <div className="flex items-center gap-1">
-                                  {story.type === "private" ? (
-                                    <span className="text-[9px] font-bold text-amber-500 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-full flex items-center gap-1">
-                                      <Lock className="w-2.5 h-2.5" />
-                                      Friends Story
-                                    </span>
-                                  ) : (
-                                    <span className="text-[9px] font-bold text-blue-400 bg-blue-400/10 border border-blue-400/20 px-2 py-0.5 rounded-full flex items-center gap-1">
-                                      <Globe className="w-2.5 h-2.5" />
-                                      Public Story
-                                    </span>
-                                  )}
-                                  <span className="text-[9px] text-slate-500 font-medium font-mono">
-                                    • {new Date(story.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                                  </span>
-                                </div>
+                        <div className="flex-1 overflow-hidden p-4 flex flex-col justify-center bg-gradient-to-b from-slate-900 via-slate-950 to-slate-900 relative">
+                          
+                          {/* Navigation Buttons */}
+                          <div className="absolute inset-x-2 top-1/2 -translate-y-1/2 flex justify-between z-20 pointer-events-none">
+                            <button
+                              onClick={() => {
+                                setCurrentStoryIndex(prev => Math.max(0, prev - 1));
+                                setIsStoryPaused(true); // Pause auto-play on manual interaction
+                              }}
+                              disabled={currentStoryIndex === 0}
+                              className={`p-1.5 rounded-full bg-slate-950/70 border border-slate-800 text-white hover:bg-slate-900 transition-all pointer-events-auto cursor-pointer disabled:opacity-0 disabled:cursor-not-allowed`}
+                              title="Previous Story"
+                            >
+                              <ChevronLeft className="w-4 h-4" />
+                            </button>
+                            <button
+                              onClick={() => {
+                                if (currentStoryIndex + 1 < activeStoryGroup.stories.length) {
+                                  setCurrentStoryIndex(prev => prev + 1);
+                                  setIsStoryPaused(true); // Pause auto-play on manual interaction
+                                } else {
+                                  setActiveStoryGroup(null);
+                                }
+                              }}
+                              className="p-1.5 rounded-full bg-slate-950/70 border border-slate-800 text-white hover:bg-slate-900 transition-all pointer-events-auto cursor-pointer"
+                              title="Next Story"
+                            >
+                              <ChevronRight className="w-4 h-4" />
+                            </button>
+                          </div>
 
-                                {/* Story Content Text */}
-                                <p className="text-sm font-bold text-white leading-relaxed text-center max-w-[280px] bg-slate-950/40 p-4 rounded-xl border border-slate-800/80 shadow-md">
-                                  "{story.content}"
-                                </p>
-
-                                {/* Media Attachment in Slideshow */}
-                                {story.mediaUrl && (
-                                  <div className="w-full max-w-[280px] rounded-xl overflow-hidden border border-slate-800/85 bg-black/60 mt-1.5 shadow-lg">
-                                    {story.mediaType === "video" ? (
-                                      <video
-                                        src={story.mediaUrl}
-                                        className="w-full h-auto max-h-44 object-contain mx-auto"
-                                        controls
-                                        autoPlay
-                                        muted
-                                        loop
-                                        playsInline
-                                      />
-                                    ) : (
-                                      <img
-                                        src={story.mediaUrl}
-                                        alt="Story attachment"
-                                        className="w-full h-auto max-h-44 object-contain mx-auto"
-                                        referrerPolicy="no-referrer"
-                                      />
+                          <div className="flex flex-col gap-3 text-center items-center h-full justify-center">
+                            {(() => {
+                              const story = activeStoryGroup.stories[currentStoryIndex];
+                              if (!story) return null;
+                              return (
+                                <div key={story.id} className="w-full flex flex-col items-center gap-3">
+                                  {/* Story Privacy Indicator */}
+                                  <div className="flex items-center gap-1.5 justify-between w-full px-2">
+                                    <div className="flex items-center gap-1">
+                                      {story.type === "close_friends" ? (
+                                        <span className="text-[9px] font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-0.5 rounded-full flex items-center gap-1">
+                                          <Star className="w-2.5 h-2.5 fill-emerald-400 text-emerald-400" />
+                                          Close Friends
+                                        </span>
+                                      ) : story.type === "friends" || (story.type as string) === "private" ? (
+                                        <span className="text-[9px] font-bold text-amber-400 bg-amber-500/10 border border-amber-500/20 px-2.5 py-0.5 rounded-full flex items-center gap-1">
+                                          <Users className="w-2.5 h-2.5" />
+                                          Friends Only
+                                        </span>
+                                      ) : (
+                                        <span className="text-[9px] font-bold text-blue-400 bg-blue-400/10 border border-blue-400/20 px-2.5 py-0.5 rounded-full flex items-center gap-1">
+                                          <Globe className="w-2.5 h-2.5" />
+                                          Public Scope
+                                        </span>
+                                      )}
+                                      <span className="text-[9px] text-slate-500 font-medium font-mono">
+                                        • {new Date(story.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                      </span>
+                                    </div>
+                                    
+                                    {/* Delete Button (Visible only to the story author) */}
+                                    {story.userId === myProfile.id && (
+                                      <button
+                                        onClick={() => handleDeleteStory(story.id)}
+                                        className="text-[9px] font-bold text-rose-400 hover:text-rose-300 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/20 px-2 py-0.5 rounded-full transition-all flex items-center gap-1 cursor-pointer"
+                                        title="Delete your story"
+                                      >
+                                        <Trash2 className="w-2.5 h-2.5" />
+                                        Delete
+                                      </button>
                                     )}
                                   </div>
-                                )}
-                              </div>
-                            ))}
+
+                                  {/* Story Content Text */}
+                                  <p className="text-sm font-bold text-white leading-relaxed text-center w-full bg-slate-950/40 p-4 rounded-xl border border-slate-800/80 shadow-md">
+                                    "{story.content}"
+                                  </p>
+
+                                  {/* Media Attachment in Slideshow */}
+                                  {story.mediaUrl && (
+                                    <div className="w-full rounded-xl overflow-hidden border border-slate-800/85 bg-black/60 mt-1.5 shadow-lg flex items-center justify-center h-48">
+                                      {story.mediaType === "video" ? (
+                                        <video
+                                          src={story.mediaUrl}
+                                          className="w-full h-full object-contain mx-auto"
+                                          controls
+                                          autoPlay
+                                          muted
+                                          loop
+                                          playsInline
+                                        />
+                                      ) : (
+                                        <img
+                                          src={story.mediaUrl}
+                                          alt="Story attachment"
+                                          className="w-full h-full object-contain mx-auto"
+                                          referrerPolicy="no-referrer"
+                                        />
+                                      )}
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })()}
                           </div>
                         </div>
 
