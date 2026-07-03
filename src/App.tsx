@@ -134,6 +134,7 @@ export default function App() {
 
   // Navigation
   const [activeTab, setActiveTab] = useState<"developer" | "app_demo">("app_demo");
+  const [mobileDemoTab, setMobileDemoTab] = useState<"radar" | "friends" | "share" | "chat" | "profile">("radar");
 
   // ----------------------------------------------------
   // DEVELOPER HUB STATES
@@ -2110,15 +2111,15 @@ export default function App() {
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -15 }}
               transition={{ duration: 0.2 }}
-              className="flex-1 p-4 lg:p-6 grid grid-cols-1 lg:grid-cols-12 gap-6 max-w-[1600px] mx-auto w-full"
+              className="flex-1 p-4 lg:p-6 pb-24 lg:pb-6 grid grid-cols-1 lg:grid-cols-12 gap-6 max-w-[1600px] mx-auto w-full"
               id="app-demo-workspace"
             >
               
               {/* Left Column: Local Profile Builder & Radar controls (col-span-3) */}
-              <div className="lg:col-span-3 flex flex-col gap-6">
+              <div className={`lg:col-span-3 flex flex-col gap-6 ${mobileDemoTab !== "chat" ? "flex" : "hidden lg:flex"}`}>
                 
                 {/* 1. Dynamic User Profile Builder Panel */}
-                <div className="bg-white rounded-xl border border-[#E2E8F0] overflow-hidden flex flex-col shadow-sm">
+                <div className={`bg-white rounded-xl border border-[#E2E8F0] overflow-hidden flex flex-col shadow-sm ${mobileDemoTab === "profile" ? "flex" : "hidden lg:flex"}`}>
                   <div className="bg-[#F1F5F9] px-4 py-3 border-b border-[#E2E8F0] text-xs font-bold uppercase tracking-wider text-[#64748B] flex items-center justify-between">
                     <h3 className="text-xs font-extrabold uppercase tracking-wider text-[#64748B] flex items-center gap-1.5">
                       <User className="w-3.5 h-3.5 text-[#2563EB]" />
@@ -2301,7 +2302,7 @@ export default function App() {
                 </div>
 
                 {/* 1B. Share Local Story / Status Panel */}
-                <div className="bg-white rounded-xl border border-[#E2E8F0] overflow-hidden flex flex-col shadow-sm" id="share-story-panel">
+                <div className={`bg-white rounded-xl border border-[#E2E8F0] overflow-hidden flex flex-col shadow-sm ${mobileDemoTab === "share" ? "flex" : "hidden lg:flex"}`} id="share-story-panel">
                   <div className="bg-[#F1F5F9] px-4 py-3 border-b border-[#E2E8F0] text-xs font-bold uppercase tracking-wider text-[#64748B] flex items-center justify-between">
                     <h3 className="text-xs font-extrabold uppercase tracking-wider text-[#64748B] flex items-center gap-1.5">
                       <Camera className="w-3.5 h-3.5 text-pink-600 animate-pulse" />
@@ -2520,8 +2521,58 @@ export default function App() {
                   </div>
                 </div>
 
+                {/* 1C. Share Section Friends List (Visible on Share Tab on mobile) */}
+                {mobileDemoTab === "share" && (
+                  <div className="bg-white rounded-xl border border-[#E2E8F0] overflow-hidden flex flex-col shadow-sm md:hidden" id="share-section-friends">
+                    <div className="bg-[#F1F5F9] px-4 py-3 border-b border-[#E2E8F0] text-xs font-bold uppercase tracking-wider text-[#64748B] flex items-center justify-between">
+                      <h3 className="text-xs font-extrabold uppercase tracking-wider text-[#64748B] flex items-center gap-1.5">
+                        <Users className="w-3.5 h-3.5 text-pink-600" />
+                        Friends List ({nearbyPeople.filter(p => p.status === "accepted").length})
+                      </h3>
+                      <span className="text-[9px] bg-pink-100 text-pink-800 font-bold px-2 py-0.5 rounded-full uppercase tracking-wider">Share Targets</span>
+                    </div>
+                    <div className="p-4 flex flex-col gap-3">
+                      {nearbyPeople.filter(p => p.status === "accepted").length === 0 ? (
+                        <div className="text-center py-6 text-slate-500 text-xs">
+                          <p className="font-semibold mb-1">No friends added yet.</p>
+                          <p className="text-[10px] text-slate-400">Discover and connect with nearby people on the Radar first!</p>
+                        </div>
+                      ) : (
+                        <div className="flex flex-col gap-2.5 max-h-[300px] overflow-y-auto">
+                          {nearbyPeople.filter(p => p.status === "accepted").map(person => (
+                            <div key={person.id} className="flex items-center justify-between p-2 hover:bg-slate-50 rounded-lg border border-slate-100 transition-colors">
+                              <div className="flex items-center gap-2.5">
+                                <div className="relative">
+                                  <img src={person.avatar} alt={person.name} className="w-9 h-9 rounded-lg border border-slate-200 object-contain" referrerPolicy="no-referrer" />
+                                  {person.online && (
+                                    <span className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-[#10B981] rounded-full border-2 border-white"></span>
+                                  )}
+                                </div>
+                                <div>
+                                  <h4 className="text-xs font-bold text-slate-800 leading-tight">{person.name}</h4>
+                                  <p className="text-[10px] text-slate-400 font-medium truncate max-w-[150px]">{person.bio || "Active friend"}</p>
+                                </div>
+                              </div>
+                              <button
+                                onClick={() => {
+                                  setActiveChatId(person.id);
+                                  setMobileDemoTab("chat");
+                                  triggerAlert(`Opened conversation with ${person.name}!`, "success");
+                                }}
+                                className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-white bg-[#2563EB] hover:bg-blue-700 rounded transition-colors flex items-center gap-1 cursor-pointer"
+                              >
+                                <Send className="w-3 h-3" /> Chat
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
                 {/* 2. Standout Radar Matcher Controls Panel */}
-                <div className="bg-white rounded-xl border border-[#E2E8F0] overflow-hidden flex flex-col shadow-sm">
+                <div className={`bg-white rounded-xl border border-[#E2E8F0] overflow-hidden flex flex-col shadow-sm ${mobileDemoTab === "friends" ? "flex" : "hidden lg:flex"}`}>
                   <div className="bg-[#F1F5F9] px-4 py-3 border-b border-[#E2E8F0] text-xs font-bold uppercase tracking-wider text-[#64748B] flex items-center justify-between">
                     <h3 className="text-xs font-extrabold uppercase tracking-wider text-[#64748B] flex items-center gap-1.5">
                       <Compass className="w-3.5 h-3.5 text-[#2563EB]" />
@@ -2568,7 +2619,7 @@ export default function App() {
                 </div>
 
                 {/* 3. Joined Communities Feed Channels Panel */}
-                <div className="bg-white rounded-xl border border-[#E2E8F0] overflow-hidden flex flex-col shadow-sm">
+                <div className={`bg-white rounded-xl border border-[#E2E8F0] overflow-hidden flex flex-col shadow-sm ${mobileDemoTab === "radar" ? "flex" : "hidden lg:flex"}`}>
                   <div className="bg-[#F1F5F9] px-4 py-3 border-b border-[#E2E8F0] text-xs font-bold uppercase tracking-wider text-[#64748B] flex items-center">
                     <span className="font-bold flex items-center gap-1.5">📢 Joined Group Feeds</span>
                   </div>
@@ -2633,10 +2684,10 @@ export default function App() {
               </div>
 
               {/* Middle Column: Interactive Locator Radar Map & Matched Connections (col-span-5) */}
-              <div className="lg:col-span-5 flex flex-col gap-6" id="radar-column">
+              <div className={`lg:col-span-5 flex flex-col gap-6 ${mobileDemoTab !== "chat" && mobileDemoTab !== "profile" ? "flex" : "hidden lg:flex"}`} id="radar-column">
                 
                 {/* 2A. Instagram-like Stories Tray */}
-                <div className="bg-white rounded-xl border border-[#E2E8F0] p-4 flex flex-col gap-3 shadow-sm" id="stories-tray-panel">
+                <div className={`bg-white rounded-xl border border-[#E2E8F0] p-4 flex flex-col gap-3 shadow-sm ${(mobileDemoTab === "radar" || mobileDemoTab === "share") ? "flex" : "hidden lg:flex"}`} id="stories-tray-panel">
                   <div className="flex items-center justify-between">
                     <span className="text-[10px] font-bold text-[#64748B] uppercase tracking-wider flex items-center gap-1.5">
                       <Camera className="w-3.5 h-3.5 text-pink-600" />
@@ -2724,7 +2775,7 @@ export default function App() {
                 </div>
                 
                 {/* Visual locator radar map schematic */}
-                <div className="bg-white rounded-xl border border-[#E2E8F0] overflow-hidden flex flex-col shadow-sm">
+                <div className={`bg-white rounded-xl border border-[#E2E8F0] overflow-hidden flex flex-col shadow-sm ${mobileDemoTab === "radar" ? "flex" : "hidden lg:flex"}`}>
                   <div className="bg-[#F1F5F9] px-4 py-3 border-b border-[#E2E8F0] text-xs font-bold uppercase tracking-wider text-[#64748B] flex items-center justify-between">
                     <h3 className="text-xs font-extrabold uppercase tracking-wider text-[#64748B] flex items-center gap-2">
                       <div className="w-2.5 h-2.5 rounded-full bg-[#10B981] animate-pulse"></div>
@@ -2841,7 +2892,7 @@ export default function App() {
                 </div>
 
                 {/* Nearby People list matchcards */}
-                <div className="bg-white rounded-xl border border-[#E2E8F0] overflow-hidden flex flex-col shadow-sm">
+                <div className={`bg-white rounded-xl border border-[#E2E8F0] overflow-hidden flex flex-col shadow-sm ${mobileDemoTab === "friends" ? "flex" : "hidden lg:flex"}`}>
                   <div className="bg-[#F1F5F9] px-4 py-3 border-b border-[#E2E8F0] text-xs font-bold uppercase tracking-wider text-[#64748B] flex items-center justify-between">
                     <span>Local Matches Radar</span>
                     <span className="text-[10px] bg-[#EFF6FF] text-[#1E40AF] font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wider">Filtered</span>
@@ -2991,7 +3042,7 @@ export default function App() {
                 </div>
 
                 {/* Local interest-based communities listed */}
-                <div className="bg-white rounded-xl border border-[#E2E8F0] overflow-hidden flex flex-col shadow-sm">
+                <div className={`bg-white rounded-xl border border-[#E2E8F0] overflow-hidden flex flex-col shadow-sm ${mobileDemoTab === "radar" ? "flex" : "hidden lg:flex"}`}>
                   <div className="bg-[#F1F5F9] px-4 py-3 border-b border-[#E2E8F0] text-xs font-bold uppercase tracking-wider text-[#64748B] flex items-center justify-between">
                     <span className="font-bold flex items-center gap-1.5">🗺️ Local Communities ({filteredCommunities.length})</span>
                     <button
@@ -3051,7 +3102,7 @@ export default function App() {
 
 
               {/* Right Column: Premium Interactive Messaging Window (col-span-4) */}
-              <div className="lg:col-span-4 flex flex-col h-[760px] max-h-screen bg-white rounded-xl border border-[#E2E8F0] shadow-sm relative overflow-hidden" id="chat-window">
+              <div className={`lg:col-span-4 flex flex-col h-[760px] max-h-screen bg-white rounded-xl border border-[#E2E8F0] shadow-sm relative overflow-hidden ${mobileDemoTab === "chat" ? "flex min-h-[550px] sm:min-h-[650px]" : "hidden lg:flex"}`} id="chat-window">
                 
                 {/* 1. Header of conversation (contact info + calls + actions) */}
                 <div className="bg-[#F1F5F9] border-b border-[#E2E8F0] px-4 py-3 flex items-center justify-between gap-3 relative z-10">
@@ -4027,6 +4078,117 @@ export default function App() {
             </motion.div>
           )}
         </AnimatePresence>
+
+        {/* ======================================================== */}
+        {/* MOBILE BOTTOM NAVIGATION BAR (INSTAGRAM STYLE - CUSTOM DESIGN) */}
+        {/* ======================================================== */}
+        {activeTab === "app_demo" && (
+          <div className="fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-md border-t border-slate-200/80 shadow-lg px-4 py-2 z-50 flex items-center justify-around md:hidden pb-safe" id="mobile-instagram-nav">
+            {/* 1. Radar / Home Tab */}
+            <button
+              onClick={() => setMobileDemoTab("radar")}
+              className="flex flex-col items-center justify-center py-1 px-3 relative group focus:outline-none cursor-pointer"
+              id="mobile-nav-radar"
+            >
+              <Globe className={`w-5 h-5 transition-all duration-300 ${
+                mobileDemoTab === "radar" 
+                  ? "text-[#2563EB] scale-110 drop-shadow-[0_2px_8px_rgba(37,99,235,0.2)]" 
+                  : "text-slate-400 hover:text-slate-600 hover:scale-105"
+              }`} />
+              <span className={`text-[9px] font-bold mt-0.5 transition-colors ${
+                mobileDemoTab === "radar" ? "text-[#2563EB]" : "text-slate-400"
+              }`}>Radar</span>
+              {mobileDemoTab === "radar" && (
+                <span className="absolute bottom-0 w-1.5 h-1.5 bg-[#2563EB] rounded-full"></span>
+              )}
+            </button>
+
+            {/* 2. Friends Tab with Dynamic Badge */}
+            <button
+              onClick={() => setMobileDemoTab("friends")}
+              className="flex flex-col items-center justify-center py-1 px-3 relative group focus:outline-none cursor-pointer"
+              id="mobile-nav-friends"
+            >
+              <div className="relative">
+                <Users className={`w-5 h-5 transition-all duration-300 ${
+                  mobileDemoTab === "friends" 
+                    ? "text-[#2563EB] scale-110 drop-shadow-[0_2px_8px_rgba(37,99,235,0.2)]" 
+                    : "text-slate-400 hover:text-slate-600 hover:scale-105"
+                }`} />
+                {receivedRequests.length > 0 && (
+                  <span className="absolute -top-1.5 -right-1.5 bg-rose-500 text-white font-extrabold text-[8px] px-1.5 py-0.5 rounded-full border-2 border-white animate-pulse min-w-[16px] text-center">
+                    {receivedRequests.length}
+                  </span>
+                )}
+              </div>
+              <span className={`text-[9px] font-bold mt-0.5 transition-colors ${
+                mobileDemoTab === "friends" ? "text-[#2563EB]" : "text-slate-400"
+              }`}>Friends</span>
+              {mobileDemoTab === "friends" && (
+                <span className="absolute bottom-0 w-1.5 h-1.5 bg-[#2563EB] rounded-full"></span>
+              )}
+            </button>
+
+            {/* 3. Share / Story Tab */}
+            <button
+              onClick={() => setMobileDemoTab("share")}
+              className="flex flex-col items-center justify-center py-1 px-3 relative group focus:outline-none cursor-pointer"
+              id="mobile-nav-share"
+            >
+              <Camera className={`w-5 h-5 transition-all duration-300 ${
+                mobileDemoTab === "share" 
+                  ? "text-pink-600 scale-110 drop-shadow-[0_2px_8px_rgba(219,39,119,0.2)]" 
+                  : "text-slate-400 hover:text-slate-600 hover:scale-105"
+              }`} />
+              <span className={`text-[9px] font-bold mt-0.5 transition-colors ${
+                mobileDemoTab === "share" ? "text-pink-600" : "text-slate-400"
+              }`}>Share</span>
+              {mobileDemoTab === "share" && (
+                <span className="absolute bottom-0 w-1.5 h-1.5 bg-pink-600 rounded-full"></span>
+              )}
+            </button>
+
+            {/* 4. Chat / Messages Tab */}
+            <button
+              onClick={() => setMobileDemoTab("chat")}
+              className="flex flex-col items-center justify-center py-1 px-3 relative group focus:outline-none cursor-pointer"
+              id="mobile-nav-chat"
+            >
+              <MessageCircle className={`w-5 h-5 transition-all duration-300 ${
+                mobileDemoTab === "chat" 
+                  ? "text-[#2563EB] scale-110 drop-shadow-[0_2px_8px_rgba(37,99,235,0.2)]" 
+                  : "text-slate-400 hover:text-slate-600 hover:scale-105"
+              }`} />
+              <span className={`text-[9px] font-bold mt-0.5 transition-colors ${
+                mobileDemoTab === "chat" ? "text-[#2563EB]" : "text-slate-400"
+              }`}>Inbox</span>
+              {mobileDemoTab === "chat" && (
+                <span className="absolute bottom-0 w-1.5 h-1.5 bg-[#2563EB] rounded-full"></span>
+              )}
+            </button>
+
+            {/* 5. Profile Tab (User Profile Photo) */}
+            <button
+              onClick={() => setMobileDemoTab("profile")}
+              className="flex flex-col items-center justify-center py-1 px-3 relative group focus:outline-none cursor-pointer"
+              id="mobile-nav-profile"
+            >
+              <div className={`w-6 h-6 rounded-full border transition-all duration-300 overflow-hidden bg-slate-100 shrink-0 ${
+                mobileDemoTab === "profile" 
+                  ? "ring-2 ring-[#2563EB] ring-offset-1 border-transparent scale-110 drop-shadow-[0_2px_8px_rgba(37,99,235,0.2)]" 
+                  : "border-slate-300 hover:scale-105"
+              }`}>
+                <img src={avatarUrl} alt="Me" className="w-full h-full object-contain" referrerPolicy="no-referrer" />
+              </div>
+              <span className={`text-[9px] font-bold mt-0.5 transition-colors ${
+                mobileDemoTab === "profile" ? "text-[#2563EB]" : "text-slate-400"
+              }`}>Profile</span>
+              {mobileDemoTab === "profile" && (
+                <span className="absolute bottom-0 w-1.5 h-1.5 bg-[#2563EB] rounded-full"></span>
+              )}
+            </button>
+          </div>
+        )}
 
       </main>
 
