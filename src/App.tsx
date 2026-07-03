@@ -235,8 +235,63 @@ export default function App() {
     localStorage.setItem("geochat_local_stories", JSON.stringify(localStories));
   }, [localStories]);
 
+  // Demo simulator mode state: allow posting stories as myself or other nearby users/friends
+  const [postStoryAsId, setPostStoryAsId] = useState<string>("myself");
+
   const mergedStories = useMemo(() => {
     const all = [...stories, ...localStories];
+    
+    // To make the Nearby Stories Feed live and realistic, let's auto-generate 
+    // a story for any active nearby user or friend who doesn't already have one in Firestore.
+    nearbyPeople.forEach((person, idx) => {
+      const hasStory = all.some(s => s.userId === person.id);
+      if (!hasStory) {
+        let content = "Loving the Geochat Link vibes today! 🌐✨";
+        let mediaUrl = "";
+        let mediaType: "image" | "video" | undefined = undefined;
+
+        if (person.interests.includes("coding")) {
+          content = "Just shipped a major full-stack update. Coding from a cozy cafe! ☕💻";
+          mediaUrl = "https://images.unsplash.com/photo-1515621061946-eff1c2a352bd?auto=format&fit=crop&w=500&q=80";
+          mediaType = "image";
+        } else if (person.interests.includes("photography")) {
+          content = "Beautiful sunset today. Captured some gorgeous raw frames! 📸🌇";
+          mediaUrl = "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&w=500&q=80";
+          mediaType = "image";
+        } else if (person.interests.includes("music")) {
+          content = "Listening to some warm acoustic ambient records on a rainy evening. 🎸🌧️";
+          mediaUrl = "https://assets.mixkit.co/videos/preview/mixkit-raindrops-on-a-window-at-night-42171-large.mp4";
+          mediaType = "video";
+        } else if (person.interests.includes("cricket")) {
+          content = "Early morning cricket nets session. Practice pays off! 🏏🔥";
+        } else if (person.interests.includes("study")) {
+          content = "Deep focus study session at the public library today. 📖🎓";
+        }
+
+        // Determine deterministic location matching their distance
+        const angles = [35, 140, 210, 290, 325];
+        const angle = angles[idx % angles.length] * (Math.PI / 180);
+        const latOffset = (Math.cos(angle) * person.distance) / 111.0;
+        const lonOffset = (Math.sin(angle) * person.distance) / 111.0;
+
+        const storyType = person.status === "accepted" ? "private" : "public";
+
+        all.push({
+          id: `sim_story_${person.id}`,
+          userId: person.id,
+          userName: person.name,
+          avatar: person.avatar,
+          content: content,
+          type: storyType,
+          timestamp: new Date(Date.now() - (idx + 1) * 2 * 3600000), // staged hours ago
+          latitude: (myProfile.latitude || 37.7749) + latOffset,
+          longitude: (myProfile.longitude || -122.4194) + lonOffset,
+          mediaUrl: mediaUrl || undefined,
+          mediaType: mediaType || undefined
+        });
+      }
+    });
+
     const seen = new Set<string>();
     const uniq: Story[] = [];
     all.forEach(s => {
@@ -246,7 +301,7 @@ export default function App() {
       }
     });
     return uniq.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
-  }, [stories, localStories]);
+  }, [stories, localStories, nearbyPeople, myProfile.latitude, myProfile.longitude]);
 
   const [newStoryContent, setNewStoryContent] = useState("");
   const [newStoryType, setNewStoryType] = useState<"public" | "private">("public");
@@ -591,7 +646,9 @@ export default function App() {
             type: data.type || "public",
             timestamp: storyTime,
             latitude: data.latitude || 37.7749,
-            longitude: data.longitude || -122.4194
+            longitude: data.longitude || -122.4194,
+            mediaUrl: data.mediaUrl || undefined,
+            mediaType: data.mediaType || undefined
           });
         }
       });
@@ -951,17 +1008,41 @@ export default function App() {
     const avatarUrl = `https://api.dicebear.com/7.x/adventurer/svg?seed=${myProfile.avatarSeed}`;
     const newStoryId = `story_${Math.random().toString(36).substring(2, 9)}`;
     const now = new Date();
+
+    let userId = myProfile.id;
+    let userName = myProfile.name;
+    let avatar = avatarUrl;
+    let latitude = myProfile.latitude || 37.7749;
+    let longitude = myProfile.longitude || -122.4194;
+
+    if (postStoryAsId !== "myself") {
+      const targetUser = nearbyPeople.find(p => p.id === postStoryAsId);
+      if (targetUser) {
+        userId = targetUser.id;
+        userName = targetUser.name;
+        avatar = targetUser.avatar;
+        
+        // Find their coordinates based on their actual distance and deterministic angles
+        const idx = nearbyPeople.indexOf(targetUser);
+        const angles = [35, 140, 210, 290, 325];
+        const angle = angles[idx % angles.length] * (Math.PI / 180);
+        const latOffset = (Math.cos(angle) * targetUser.distance) / 111.0;
+        const lonOffset = (Math.sin(angle) * targetUser.distance) / 111.0;
+        latitude = (myProfile.latitude || 37.7749) + latOffset;
+        longitude = (myProfile.longitude || -122.4194) + lonOffset;
+      }
+    }
     
     const storyPayload: Story = {
       id: newStoryId,
-      userId: myProfile.id,
-      userName: myProfile.name,
-      avatar: avatarUrl,
+      userId: userId,
+      userName: userName,
+      avatar: avatar,
       content: newStoryContent.trim(),
       type: newStoryType,
       timestamp: now,
-      latitude: myProfile.latitude || 37.7749,
-      longitude: myProfile.longitude || -122.4194,
+      latitude: latitude,
+      longitude: longitude,
       mediaUrl: storyMediaUrl || undefined,
       mediaType: storyMediaType || undefined
     };
@@ -984,7 +1065,7 @@ export default function App() {
           mediaUrl: storyPayload.mediaUrl || null,
           mediaType: storyPayload.mediaType || null
         });
-        triggerAlert(`Your ${newStoryType} story was shared successfully on the radar!`, "success");
+        triggerAlert(`Story was shared successfully as "${storyPayload.userName}" on the radar!`, "success");
       } else {
         triggerAlert("Firestore not connected. Story saved in your local session!", "info");
       }
@@ -2149,6 +2230,36 @@ export default function App() {
 
                   <div className="p-4 flex flex-col gap-3">
                     <form onSubmit={handlePostStory} className="flex flex-col gap-3.5">
+                      
+                      {/* Demo Simulator Mode: Post Story As */}
+                      <div className="flex flex-col gap-1.5 p-2 bg-gradient-to-r from-pink-50 to-indigo-50 border border-pink-100 rounded-lg">
+                        <label className="text-[10px] font-bold text-pink-700 uppercase tracking-wider flex items-center justify-between">
+                          <span className="flex items-center gap-1">
+                            <Sparkles className="w-3.5 h-3.5 text-pink-500 animate-spin" style={{ animationDuration: '3s' }} />
+                            <span>Demo Posting Identity (Post As)</span>
+                          </span>
+                          <span className="text-[8px] bg-pink-200 text-pink-800 font-extrabold px-1.5 py-0.5 rounded uppercase">SIMULATOR</span>
+                        </label>
+                        <select
+                          value={postStoryAsId}
+                          onChange={(e) => {
+                            setPostStoryAsId(e.target.value);
+                            triggerAlert(`Demo posting mode switched to: ${e.target.value === "myself" ? "Myself" : nearbyPeople.find(p => p.id === e.target.value)?.name}`, "info");
+                          }}
+                          className="bg-white border border-pink-200 hover:border-pink-300 rounded-md px-2 py-1 text-xs font-bold text-slate-700 focus:outline-none focus:ring-1 focus:ring-pink-400 cursor-pointer"
+                        >
+                          <option value="myself">Myself ({myProfile.name || "Default User"})</option>
+                          {nearbyPeople.map((person) => (
+                            <option key={person.id} value={person.id}>
+                              {person.name} ({person.distance.toFixed(1)} km away • {person.status === "accepted" ? "Friend" : "Nearby"})
+                            </option>
+                          ))}
+                        </select>
+                        <p className="text-[8px] text-pink-600/80 font-medium leading-relaxed">
+                          Test radar filtering! Post as a nearby user to see their story on your feed instantly, or as a private friend to test secured friendship access.
+                        </p>
+                      </div>
+
                       <div className="flex flex-col gap-1">
                         <label className="text-[10px] font-bold text-[#64748B] uppercase tracking-wider flex items-center gap-1">
                           <span>Story Text Content</span>
