@@ -35,12 +35,12 @@ import { AuthScreen } from "./components/AuthScreen";
 import { LocalCommunity } from "./types";
 
 const firebaseConfig = {
-  apiKey: (import.meta as any).env.VITE_FIREBASE_API_KEY || "AIzaSyCn0g3Q9SGIl5ieI9euatMpwJjQ36P2mts",
-  authDomain: (import.meta as any).env.VITE_FIREBASE_AUTH_DOMAIN || "geochat-link.firebaseapp.com",
-  projectId: (import.meta as any).env.VITE_FIREBASE_PROJECT_ID || "geochat-link",
-  storageBucket: (import.meta as any).env.VITE_FIREBASE_STORAGE_BUCKET || "geochat-link.firebasestorage.app",
-  messagingSenderId: (import.meta as any).env.VITE_FIREBASE_MESSAGING_SENDER_ID || "746218402715",
-  appId: (import.meta as any).env.VITE_FIREBASE_APP_ID || "1:746218402715:web:47cdddf3de1ded503de73e"
+  apiKey: (import.meta as any).env.VITE_FIREBASE_API_KEY,
+  authDomain: (import.meta as any).env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: (import.meta as any).env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: (import.meta as any).env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: (import.meta as any).env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: (import.meta as any).env.VITE_FIREBASE_APP_ID
 };
 
 const firebaseApp = initializeApp(firebaseConfig);

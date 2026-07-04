@@ -206,8 +206,8 @@ app.get("/api/giphy-tenor/search", async (req, res) => {
 
     const results: { id: string; url: string; title: string }[] = [];
 
-    // GIPHY Search Integration with standard demo public beta key as safe fallback
-    const giphyApiKey = process.env.GIPHY_API_KEY || "dc6zaTOxFJmzC";
+    // GIPHY Search Integration loaded strictly from environment
+    const giphyApiKey = process.env.GIPHY_API_KEY;
     const giphyEndpoint = isStickers ? "stickers" : "gifs";
     const giphyUrl = searchQuery 
       ? `https://api.giphy.com/v1/${giphyEndpoint}/search?api_key=${giphyApiKey}&q=${encodeURIComponent(searchQuery)}&limit=8`
@@ -233,9 +233,8 @@ app.get("/api/giphy-tenor/search", async (req, res) => {
       console.error("Error fetching from GIPHY:", err);
     }
 
-    // Tenor Search Integration (supports fallback key for demo mode)
-    // Note: Tenor uses different search endpoints for trending / search
-    const tenorApiKey = process.env.TENOR_API_KEY || "LIVDSRZULELA";
+    // Tenor Search Integration loaded strictly from environment
+    const tenorApiKey = process.env.TENOR_API_KEY;
     const tenorUrl = searchQuery
       ? `https://tenor.googleapis.com/v2/posts?key=${tenorApiKey}&q=${encodeURIComponent(searchQuery)}&limit=8&client_key=geochat_link`
       : `https://tenor.googleapis.com/v2/featured?key=${tenorApiKey}&limit=8&client_key=geochat_link`;
