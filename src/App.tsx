@@ -211,6 +211,7 @@ export default function App() {
   const [newCommDescription, setNewCommDescription] = useState("");
   const [showRequestsDropdown, setShowRequestsDropdown] = useState(false);
   const [publicPostsScope, setPublicPostsScope] = useState<"global" | "nearby">("nearby");
+  const [selectedRadarTarget, setSelectedRadarTarget] = useState<any | null>(null);
   
   // Dynamic User database (synchronized from Firestore in real-time)
   const [nearbyPeople, setNearbyPeople] = useState<NearbyUser[]>([]);
@@ -1478,6 +1479,21 @@ export default function App() {
     return true;
   });
 
+  // Helper to compute deterministic coordinates on circular radar plane based on ID and distance
+  const getCoordinates = (id: string, distance: number) => {
+    let sum = 0;
+    for (let i = 0; i < id.length; i++) {
+      sum += id.charCodeAt(i);
+    }
+    const angle = (sum % 360) * (Math.PI / 180);
+    const maxRange = Math.max(searchRadius, 1);
+    // Limit radius between 8% and 42% from center so dots don't overflow or overlap user avatar
+    const radius = 8 + Math.min((distance / maxRange) * 34, 34); 
+    const x = 50 + radius * Math.cos(angle);
+    const y = 50 + radius * Math.sin(angle);
+    return { x, y };
+  };
+
   const receivedRequests = Object.entries(connectionsData)
     .filter(([_, conn]) => {
       const c = conn as { status: string; senderId: string; receiverId: string; connectionId: string };
@@ -2376,11 +2392,10 @@ export default function App() {
               id="app-demo-workspace"
             >
               
-              {/* Left Column: Local Profile Builder & Radar controls (col-span-3) */}
-              <div className={`lg:col-span-3 flex flex-col gap-6 ${mobileDemoTab !== "chat" ? "flex" : "hidden lg:flex"}`}>
+              {/* Profile, Story, Post and Chat feeds directly aligned in responsive grids */}
                 
                 {/* 1. Dynamic User Profile Builder Panel */}
-                <div className={`bg-white rounded-xl border border-[#E2E8F0] overflow-hidden flex flex-col shadow-sm ${mobileDemoTab === "profile" ? "flex" : "hidden lg:flex"}`}>
+                <div className={`col-span-12 max-w-2xl mx-auto w-full bg-white rounded-xl border border-[#E2E8F0] overflow-hidden flex flex-col shadow-sm ${mobileDemoTab === "profile" ? "flex" : "hidden"}`}>
                   <div className="bg-[#F1F5F9] px-4 py-3 border-b border-[#E2E8F0] text-xs font-bold uppercase tracking-wider text-[#64748B] flex items-center justify-between">
                     <h3 className="text-xs font-extrabold uppercase tracking-wider text-[#64748B] flex items-center gap-1.5">
                       <User className="w-3.5 h-3.5 text-[#2563EB]" />
@@ -2563,7 +2578,7 @@ export default function App() {
                 </div>
 
                 {/* 1B. Share Local Story / Status Panel */}
-                <div className={`bg-white rounded-xl border border-[#E2E8F0] overflow-hidden flex flex-col shadow-sm ${mobileDemoTab === "share" ? "flex" : "hidden lg:flex"}`} id="share-story-panel">
+                <div className={`col-span-12 lg:col-span-7 bg-white rounded-xl border border-[#E2E8F0] overflow-hidden flex flex-col shadow-sm ${mobileDemoTab === "share" ? "flex" : "hidden"}`} id="share-story-panel">
                   <div className="bg-[#F1F5F9] px-4 py-3 border-b border-[#E2E8F0] text-xs font-bold uppercase tracking-wider text-[#64748B] flex items-center justify-between">
                     <h3 className="text-xs font-extrabold uppercase tracking-wider text-[#64748B] flex items-center gap-1.5">
                       <Camera className="w-3.5 h-3.5 text-pink-600 animate-pulse" />
@@ -2803,7 +2818,7 @@ export default function App() {
                 </div>
 
                 {/* 1B-2. Share Public Post Panel */}
-                <div className={`bg-white rounded-xl border border-[#E2E8F0] overflow-hidden flex flex-col shadow-sm mt-6 ${mobileDemoTab === "share" ? "flex" : "hidden lg:flex"}`} id="share-post-panel">
+                <div className={`col-span-12 lg:col-span-7 bg-white rounded-xl border border-[#E2E8F0] overflow-hidden flex flex-col shadow-sm mt-6 ${mobileDemoTab === "share" ? "flex" : "hidden"}`} id="share-post-panel">
                   <div className="bg-[#F1F5F9] px-4 py-3 border-b border-[#E2E8F0] text-xs font-bold uppercase tracking-wider text-[#64748B] flex items-center justify-between">
                     <h3 className="text-xs font-extrabold uppercase tracking-wider text-[#64748B] flex items-center gap-1.5">
                       <MessageSquare className="w-3.5 h-3.5 text-blue-600 animate-pulse" />
@@ -3015,9 +3030,9 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* 1C. Share Section Friends List (Visible on Share Tab on mobile) */}
+                {/* 1C. Share Section Friends List (Visible on Share Tab on mobile & laptop) */}
                 {mobileDemoTab === "share" && (
-                  <div className="bg-white rounded-xl border border-[#E2E8F0] overflow-hidden flex flex-col shadow-sm md:hidden" id="share-section-friends">
+                  <div className="col-span-12 lg:col-span-5 bg-white rounded-xl border border-[#E2E8F0] overflow-hidden flex flex-col shadow-sm" id="share-section-friends">
                     <div className="bg-[#F1F5F9] px-4 py-3 border-b border-[#E2E8F0] text-xs font-bold uppercase tracking-wider text-[#64748B] flex items-center justify-between">
                       <h3 className="text-xs font-extrabold uppercase tracking-wider text-[#64748B] flex items-center gap-1.5">
                         <Users className="w-3.5 h-3.5 text-pink-600" />
@@ -3066,7 +3081,7 @@ export default function App() {
                 )}
 
                 {/* 3. Joined Communities Feed Channels Panel */}
-                <div className={`bg-white rounded-xl border border-[#E2E8F0] overflow-hidden flex flex-col shadow-sm ${mobileDemoTab === "friends" ? "flex" : "hidden lg:flex"}`}>
+                <div className={`col-span-12 lg:col-span-5 bg-white rounded-xl border border-[#E2E8F0] overflow-hidden flex flex-col shadow-sm ${mobileDemoTab === "friends" ? "flex" : "hidden"}`}>
                   <div className="bg-[#F1F5F9] px-4 py-3 border-b border-[#E2E8F0] text-xs font-bold uppercase tracking-wider text-[#64748B] flex items-center">
                     <span className="font-bold flex items-center gap-1.5">📢 Joined Group Feeds</span>
                   </div>
@@ -3128,13 +3143,10 @@ export default function App() {
                   </div>
                 </div>
 
-              </div>
-
-              {/* Middle Column: Interactive Locator Radar Map & Matched Connections (col-span-5) */}
-              <div className={`lg:col-span-5 flex flex-col gap-6 ${mobileDemoTab !== "chat" && mobileDemoTab !== "profile" ? "flex" : "hidden lg:flex"}`} id="radar-column">
+              {/* Stories Tray Section */}
                 
                 {/* 2A. Instagram-like Stories Tray */}
-                <div className={`bg-white rounded-xl border border-[#E2E8F0] p-4 flex flex-col gap-3 shadow-sm ${(mobileDemoTab === "radar" || mobileDemoTab === "share") ? "flex" : "hidden lg:flex"}`} id="stories-tray-panel">
+                <div className={`col-span-12 bg-white rounded-xl border border-[#E2E8F0] p-4 flex flex-col gap-3 shadow-sm ${(mobileDemoTab === "radar" || mobileDemoTab === "share") ? "flex" : "hidden"}`} id="stories-tray-panel">
                   <div className="flex flex-col gap-2.5">
                     <div className="flex items-center justify-between">
                       <span className="text-[10px] font-bold text-[#64748B] uppercase tracking-wider flex items-center gap-1.5">
@@ -3261,8 +3273,232 @@ export default function App() {
                   )}
                 </div>
 
+                {/* Brand New: Interactive Live Social Radar Sweep Map Card */}
+                {mobileDemoTab === "radar" && (
+                  <div className="col-span-12 lg:col-span-6 bg-[#0F172A] border border-slate-800 rounded-xl overflow-hidden flex flex-col shadow-xl animate-fade-in" id="radar-sweep-dashboard">
+                    {/* Header */}
+                    <div className="bg-slate-900/60 px-4 py-3 border-b border-slate-800/80 flex items-center justify-between">
+                      <div className="flex items-center gap-1.5">
+                        <Compass className="w-4 h-4 text-emerald-400 animate-spin-slow" />
+                        <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-200">
+                          Interactive Live Social Radar
+                        </h3>
+                      </div>
+                      <span className="flex items-center gap-1.5 text-[9px] bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 font-bold px-2 py-0.5 rounded-full uppercase tracking-wider">
+                        <span className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-ping"></span>
+                        Live Sweep
+                      </span>
+                    </div>
+
+                    <div className="p-4 flex flex-col gap-4 flex-1 justify-between min-h-[440px]">
+                      {/* Interactive Radar Screen Visualization */}
+                      <div className="relative w-full aspect-square max-h-[340px] mx-auto bg-[#090C15] border border-slate-800 rounded-full flex items-center justify-center overflow-hidden shadow-inner shadow-slate-950">
+                        {/* Radar Concentric Rings */}
+                        <div className="absolute w-[90%] h-[90%] border border-emerald-500/5 rounded-full"></div>
+                        <div className="absolute w-[70%] h-[70%] border border-emerald-500/10 rounded-full"></div>
+                        <div className="absolute w-[50%] h-[50%] border border-emerald-500/15 rounded-full"></div>
+                        <div className="absolute w-[30%] h-[30%] border border-emerald-500/20 rounded-full"></div>
+                        
+                        {/* Axis crosshairs */}
+                        <div className="absolute w-full h-[0.5px] bg-emerald-500/10"></div>
+                        <div className="absolute h-full w-[0.5px] bg-emerald-500/10"></div>
+                        
+                        {/* Rotating Sweep Beam */}
+                        <div className="absolute inset-0 origin-center animate-spin-slow" style={{ animationDuration: '6s', backgroundImage: 'conic-gradient(from 0deg, transparent 50%, rgba(16, 185, 129, 0.15) 100%)' }}></div>
+
+                        {/* User representation at dead center */}
+                        <div className="absolute z-20 w-10 h-10 rounded-full p-[2px] bg-emerald-500 shadow-lg shadow-emerald-500/30 animate-pulse">
+                          <img 
+                            src={avatarUrl} 
+                            alt="Me" 
+                            className="w-full h-full rounded-full bg-slate-950 border border-slate-900 object-contain"
+                            referrerPolicy="no-referrer" 
+                          />
+                        </div>
+
+                        {/* Interactive Nearby Nodes */}
+                        {nearbyPeople.filter(p => p.distance <= searchRadius).map((person) => {
+                          const { x, y } = getCoordinates(person.id, person.distance);
+                          const isFriend = person.status === "accepted";
+                          const isPending = person.status === "pending";
+                          const isSelected = selectedRadarTarget?.id === person.id;
+                          return (
+                            <button
+                              key={person.id}
+                              onClick={() => setSelectedRadarTarget({ ...person, type: 'person' })}
+                              className="absolute z-30 group cursor-pointer focus:outline-none"
+                              style={{ left: `${x}%`, top: `${y}%`, transform: 'translate(-50%, -50%)' }}
+                            >
+                              {/* Pulse Ring */}
+                              <span className={`absolute -inset-1.5 rounded-full animate-ping opacity-60 ${
+                                isFriend ? "bg-emerald-500" : isPending ? "bg-amber-500" : "bg-blue-500"
+                              }`}></span>
+                              {/* Glowing Target Dot */}
+                              <div className={`w-3.5 h-3.5 rounded-full border-2 border-slate-950 flex items-center justify-center shadow-lg transition-transform hover:scale-125 ${
+                                isFriend ? "bg-emerald-400" : isPending ? "bg-amber-400" : "bg-blue-400"
+                              } ${isSelected ? "ring-2 ring-white scale-125" : ""}`}></div>
+                              
+                              {/* Quick Mini Label on Hover */}
+                              <span className="absolute left-1/2 -translate-x-1/2 -top-6 bg-slate-900/90 text-[9px] font-bold text-white px-1.5 py-0.5 rounded border border-slate-700 pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-40">
+                                {person.name} ({person.distance.toFixed(1)} km)
+                              </span>
+                            </button>
+                          );
+                        })}
+
+                        {/* Interactive Communities Nodes */}
+                        {communities.filter(c => c.distance <= searchRadius).map((comm) => {
+                          const { x, y } = getCoordinates(comm.id, comm.distance);
+                          const isSelected = selectedRadarTarget?.id === comm.id;
+                          return (
+                            <button
+                              key={comm.id}
+                              onClick={() => setSelectedRadarTarget({ ...comm, type: 'community' })}
+                              className="absolute z-30 group cursor-pointer focus:outline-none"
+                              style={{ left: `${x}%`, top: `${y}%`, transform: 'translate(-50%, -50%)' }}
+                            >
+                              {/* Pulse Ring */}
+                              <span className={`absolute -inset-1.5 rounded-full animate-ping opacity-50 bg-indigo-500`}></span>
+                              {/* Glowing Target Dot (Pinkish-Indigo for community channels!) */}
+                              <div className={`w-3.5 h-3.5 rounded-full border-2 border-slate-950 flex items-center justify-center shadow-lg transition-transform hover:scale-125 bg-indigo-400 ${isSelected ? "ring-2 ring-white scale-125" : ""}`}>
+                                <span className="text-[7px] font-black text-slate-950">📢</span>
+                              </div>
+                              
+                              {/* Quick Mini Label on Hover */}
+                              <span className="absolute left-1/2 -translate-x-1/2 -top-6 bg-slate-900/90 text-[9px] font-bold text-white px-1.5 py-0.5 rounded border border-indigo-500 pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-40">
+                                {comm.name} ({comm.distance.toFixed(1)} km)
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      {/* Selected Node Details Panel overlay inside card */}
+                      {selectedRadarTarget ? (
+                        <div className="bg-slate-900 border border-slate-800 rounded-xl p-3 flex items-center justify-between gap-3 animate-fade-in">
+                          <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                            <img 
+                              src={selectedRadarTarget.avatar || "https://api.dicebear.com/7.x/identicon/svg?seed=" + selectedRadarTarget.id} 
+                              alt={selectedRadarTarget.name} 
+                              className="w-10 h-10 rounded-lg border border-slate-700 bg-slate-950 object-contain shrink-0" 
+                              referrerPolicy="no-referrer"
+                            />
+                            <div className="min-w-0">
+                              <h4 className="text-xs font-black text-white flex items-center gap-1 truncate">
+                                {selectedRadarTarget.name}
+                                {selectedRadarTarget.type === 'community' && <span className="text-[8px] bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 px-1 py-0.5 rounded">Group</span>}
+                              </h4>
+                              <p className="text-[9px] text-slate-400 font-bold truncate max-w-[150px] mt-0.5">
+                                {selectedRadarTarget.type === 'community' 
+                                  ? `${selectedRadarTarget.membersCount || 1} Members • ${selectedRadarTarget.distance.toFixed(1)} km away` 
+                                  : `${selectedRadarTarget.bio || "Active node"} • ${selectedRadarTarget.distance.toFixed(1)} km away`
+                                }
+                              </p>
+                            </div>
+                          </div>
+                          
+                          <div className="flex gap-1.5 shrink-0">
+                            {selectedRadarTarget.type === 'community' ? (
+                              joinedCommunities.includes(selectedRadarTarget.id) ? (
+                                <button
+                                  onClick={() => {
+                                    setActiveChatId(selectedRadarTarget.id);
+                                    setMobileDemoTab("chat");
+                                    triggerAlert(`Opened group channel ${selectedRadarTarget.name}!`, "success");
+                                  }}
+                                  className="px-2.5 py-1.5 text-[9px] font-bold uppercase tracking-wider text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition-colors cursor-pointer flex items-center gap-1"
+                                >
+                                  <Send className="w-3 h-3" /> Feed
+                                </button>
+                              ) : (
+                                <button
+                                  onClick={() => handleJoinCommunity(selectedRadarTarget.id)}
+                                  className="px-2.5 py-1.5 text-[9px] font-bold uppercase tracking-wider text-slate-950 bg-emerald-400 hover:bg-emerald-500 rounded-lg transition-colors cursor-pointer flex items-center gap-1"
+                                >
+                                  <Plus className="w-3 h-3" /> Join
+                                </button>
+                              )
+                            ) : (
+                              selectedRadarTarget.status === "accepted" ? (
+                                <button
+                                  onClick={() => {
+                                    setActiveChatId(selectedRadarTarget.id);
+                                    setMobileDemoTab("chat");
+                                    triggerAlert(`Opened chat with ${selectedRadarTarget.name}!`, "success");
+                                  }}
+                                  className="px-2.5 py-1.5 text-[9px] font-bold uppercase tracking-wider text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors cursor-pointer flex items-center gap-1"
+                                >
+                                  <Send className="w-3 h-3" /> Message
+                                </button>
+                              ) : selectedRadarTarget.status === "sent" ? (
+                                <span className="px-2 py-1.5 text-[8px] font-bold uppercase tracking-wider text-amber-400 bg-amber-500/10 border border-amber-500/20 rounded-lg">
+                                  Sent
+                                </span>
+                              ) : selectedRadarTarget.status === "received" ? (
+                                <button
+                                  onClick={() => {
+                                    handleAcceptRequest(selectedRadarTarget.id);
+                                    triggerAlert(`Connected with ${selectedRadarTarget.name}!`, "success");
+                                  }}
+                                  className="px-2.5 py-1.5 text-[9px] font-bold uppercase tracking-wider text-white bg-emerald-500 hover:bg-emerald-600 rounded-lg transition-colors cursor-pointer flex items-center gap-1"
+                                >
+                                  Accept
+                                </button>
+                              ) : (
+                                <button
+                                  onClick={() => handleSendRequest(selectedRadarTarget.id)}
+                                  className="px-2.5 py-1.5 text-[9px] font-bold uppercase tracking-wider text-slate-950 bg-emerald-400 hover:bg-emerald-500 rounded-lg transition-colors cursor-pointer flex items-center gap-1"
+                                >
+                                  Connect
+                                </button>
+                              )
+                            )}
+                            <button 
+                              onClick={() => setSelectedRadarTarget(null)}
+                              className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition-colors"
+                            >
+                              <X className="w-3 h-3" />
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="bg-slate-900/40 border border-slate-800/60 rounded-xl p-3 text-center text-[10px] text-slate-400 leading-relaxed font-bold">
+                          🛰️ <strong>Interactive Radar active:</strong> Click on any pulsing signal targets on the sector map to identify and connect with nearby citizens or local groups!
+                        </div>
+                      )}
+
+                      {/* Radar scope Controls */}
+                      <div className="flex flex-col gap-1 border-t border-slate-800/80 pt-3">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1">
+                            <Compass className="w-3.5 h-3.5 text-emerald-400 animate-spin-slow" />
+                            Search Radius Scope
+                          </span>
+                          <span className="text-xs font-black text-emerald-400">{searchRadius} km</span>
+                        </div>
+                        <input 
+                          type="range" 
+                          min={1} 
+                          max={50} 
+                          value={searchRadius}
+                          onChange={(e) => {
+                            setSearchRadius(Number(e.target.value));
+                            triggerAlert(`Radar range expanded to ${e.target.value} km! Scanning...`, "info");
+                          }}
+                          className="w-full accent-emerald-500 bg-slate-800 h-1 rounded-lg appearance-none cursor-pointer mt-1"
+                        />
+                        <div className="flex justify-between text-[8px] text-slate-500 font-bold mt-1">
+                          <span>1 km</span>
+                          <span>25 km</span>
+                          <span>50 km</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 {/* Posts Feed Section */}
-                <div className={`bg-white rounded-xl border border-[#E2E8F0] overflow-hidden flex flex-col shadow-sm ${mobileDemoTab === "radar" ? "flex" : "hidden lg:flex"}`}>
+                <div className={`col-span-12 lg:col-span-6 bg-white rounded-xl border border-[#E2E8F0] overflow-hidden flex flex-col shadow-sm ${mobileDemoTab === "radar" ? "flex" : "hidden"}`}>
                   <div className="bg-[#F8FAFC] px-4 py-3 border-b border-[#E2E8F0] flex items-center justify-between">
                     <h3 className="text-xs font-extrabold uppercase tracking-wider text-[#1E293B] flex items-center gap-1.5">
                       <MessageSquare className="w-3.5 h-3.5 text-[#2563EB]" />
@@ -3417,7 +3653,7 @@ export default function App() {
                 </div>
 
                 {/* Nearby People list matchcards */}
-                <div className={`bg-white rounded-xl border border-[#E2E8F0] overflow-hidden flex flex-col shadow-sm ${mobileDemoTab === "friends" ? "flex" : "hidden lg:flex"}`}>
+                <div className={`col-span-12 lg:col-span-7 bg-white rounded-xl border border-[#E2E8F0] overflow-hidden flex flex-col shadow-sm ${mobileDemoTab === "friends" ? "flex" : "hidden"}`}>
                   <div className="bg-[#F1F5F9] px-4 py-3 border-b border-[#E2E8F0] text-xs font-bold uppercase tracking-wider text-[#64748B] flex items-center justify-between">
                     <span>Local Matches Radar</span>
                     <span className="text-[10px] bg-[#EFF6FF] text-[#1E40AF] font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wider">Filtered</span>
@@ -3567,7 +3803,7 @@ export default function App() {
                 </div>
 
                 {/* Local interest-based communities listed */}
-                <div className={`bg-white rounded-xl border border-[#E2E8F0] overflow-hidden flex flex-col shadow-sm ${mobileDemoTab === "friends" ? "flex" : "hidden lg:flex"}`}>
+                <div className={`col-span-12 lg:col-span-5 bg-white rounded-xl border border-[#E2E8F0] overflow-hidden flex flex-col shadow-sm ${mobileDemoTab === "friends" ? "flex" : "hidden"}`}>
                   <div className="bg-[#F1F5F9] px-4 py-3 border-b border-[#E2E8F0] text-xs font-bold uppercase tracking-wider text-[#64748B] flex items-center justify-between">
                     <span className="font-bold flex items-center gap-1.5">🗺️ Local Communities ({filteredCommunities.length})</span>
                     <button
@@ -3623,11 +3859,9 @@ export default function App() {
                   </div>
                 </div>
 
-              </div>
 
-
-              {/* Right Column: Premium Interactive Messaging Window (col-span-4) */}
-              <div className={`lg:col-span-4 flex flex-col h-[760px] max-h-screen bg-white rounded-xl border border-[#E2E8F0] shadow-sm relative overflow-hidden ${mobileDemoTab === "chat" ? "flex min-h-[550px] sm:min-h-[650px]" : "hidden lg:flex"}`} id="chat-window">
+              {/* Right Column: Premium Interactive Messaging Window (col-span-12) */}
+              <div className={`col-span-12 max-w-5xl mx-auto w-full flex flex-col h-[760px] max-h-screen bg-white rounded-xl border border-[#E2E8F0] shadow-sm relative overflow-hidden ${mobileDemoTab === "chat" ? "flex min-h-[550px] sm:min-h-[650px]" : "hidden"}`} id="chat-window">
                 
                 {/* 1. Header of conversation (contact info + calls + actions) */}
                 <div className="bg-[#F1F5F9] border-b border-[#E2E8F0] px-4 py-3 flex items-center justify-between gap-3 relative z-10">
@@ -4605,10 +4839,10 @@ export default function App() {
         </AnimatePresence>
 
         {/* ======================================================== */}
-        {/* MOBILE BOTTOM NAVIGATION BAR (INSTAGRAM STYLE - CUSTOM DESIGN) */}
+        {/* UNIFIED FLOATING BOTTOM NAVIGATION BAR (SENSATIONAL DOCK DESIGN) */}
         {/* ======================================================== */}
         {activeTab === "app_demo" && (
-          <div className="fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-md border-t border-slate-200/80 shadow-lg px-4 py-2 z-50 flex items-center justify-around md:hidden pb-safe" id="mobile-instagram-nav">
+          <div className="fixed bottom-0 md:bottom-4 left-0 right-0 md:left-1/2 md:-translate-x-1/2 md:w-full md:max-w-xl bg-white/95 backdrop-blur-md border-t md:border border-slate-200/80 shadow-lg md:shadow-2xl px-4 py-2 md:rounded-full z-50 flex items-center justify-around pb-safe transition-all duration-300" id="mobile-instagram-nav">
             {/* 1. Radar / Home Tab */}
             <button
               onClick={() => setMobileDemoTab("radar")}
