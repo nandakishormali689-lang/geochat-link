@@ -61,7 +61,7 @@ export interface Story {
   userName: string;
   avatar: string;
   content: string;
-  type: "public" | "friends" | "close_friends";
+  type: "public" | "nearby_public" | "friends" | "close_friends";
   timestamp: Date;
   latitude: number;
   longitude: number;

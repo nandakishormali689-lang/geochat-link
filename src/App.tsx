@@ -210,6 +210,7 @@ export default function App() {
   const [newCommCategory, setNewCommCategory] = useState("coding");
   const [newCommDescription, setNewCommDescription] = useState("");
   const [showRequestsDropdown, setShowRequestsDropdown] = useState(false);
+  const [publicPostsScope, setPublicPostsScope] = useState<"global" | "nearby">("nearby");
   
   // Dynamic User database (synchronized from Firestore in real-time)
   const [nearbyPeople, setNearbyPeople] = useState<NearbyUser[]>([]);
@@ -265,67 +266,25 @@ export default function App() {
   const mergedStories = useMemo(() => {
     const all = [...stories, ...localStories];
     
-    // To make the Nearby Stories Feed live and realistic, let's auto-generate 
-    // a story for any active nearby user or friend who doesn't already have one in Firestore.
-    nearbyPeople.forEach((person, idx) => {
-      const hasStory = all.some(s => s.userId === person.id);
-      if (!hasStory) {
-        let content = "Loving the Geochat Link vibes today! 🌐✨";
-        let mediaUrl = "";
-        let mediaType: "image" | "video" | undefined = undefined;
-
-        if (person.interests.includes("coding")) {
-          content = "Just shipped a major full-stack update. Coding from a cozy cafe! ☕💻";
-          mediaUrl = "https://images.unsplash.com/photo-1515621061946-eff1c2a352bd?auto=format&fit=crop&w=500&q=80";
-          mediaType = "image";
-        } else if (person.interests.includes("photography")) {
-          content = "Beautiful sunset today. Captured some gorgeous raw frames! 📸🌇";
-          mediaUrl = "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&w=500&q=80";
-          mediaType = "image";
-        } else if (person.interests.includes("music")) {
-          content = "Listening to some warm acoustic ambient records on a rainy evening. 🎸🌧️";
-          mediaUrl = "https://assets.mixkit.co/videos/preview/mixkit-raindrops-on-a-window-at-night-42171-large.mp4";
-          mediaType = "video";
-        } else if (person.interests.includes("cricket")) {
-          content = "Early morning cricket nets session. Practice pays off! 🏏🔥";
-        } else if (person.interests.includes("study")) {
-          content = "Deep focus study session at the public library today. 📖🎓";
-        }
-
-        // Determine deterministic location matching their distance
-        const angles = [35, 140, 210, 290, 325];
-        const angle = angles[idx % angles.length] * (Math.PI / 180);
-        const latOffset = (Math.cos(angle) * person.distance) / 111.0;
-        const lonOffset = (Math.sin(angle) * person.distance) / 111.0;
-
-        const storyType = person.status === "accepted" ? "friends" : "public";
-
-        all.push({
-          id: `sim_story_${person.id}`,
-          userId: person.id,
-          userName: person.name,
-          avatar: person.avatar,
-          content: content,
-          type: storyType,
-          timestamp: new Date(Date.now() - (idx + 1) * 2 * 3600000), // staged hours ago
-          latitude: (myProfile.latitude || 37.7749) + latOffset,
-          longitude: (myProfile.longitude || -122.4194) + lonOffset,
-          mediaUrl: mediaUrl || undefined,
-          mediaType: mediaType || undefined
-        });
-      }
-    });
-
-    const seen = new Set<string>();
     const uniq: Story[] = [];
     all.forEach(s => {
-      if (!seen.has(s.id)) {
-        seen.add(s.id);
+      // Check if this story is a duplicate of one already in uniq
+      const isDuplicate = uniq.some(existing => 
+        existing.id === s.id || 
+        (existing.userId === s.userId && 
+         existing.content === s.content && 
+         Math.abs(new Date(existing.timestamp).getTime() - new Date(s.timestamp).getTime()) < 300000)
+      );
+      if (!isDuplicate) {
         uniq.push(s);
       }
     });
-    return uniq.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
-  }, [stories, localStories, nearbyPeople, myProfile.latitude, myProfile.longitude]);
+    return uniq.sort((a, b) => {
+      const timeA = a.timestamp instanceof Date ? a.timestamp.getTime() : new Date(a.timestamp).getTime();
+      const timeB = b.timestamp instanceof Date ? b.timestamp.getTime() : new Date(b.timestamp).getTime();
+      return timeB - timeA;
+    });
+  }, [stories, localStories]);
 
   const [newStoryContent, setNewStoryContent] = useState("");
   const [newStoryType, setNewStoryType] = useState<"public" | "friends" | "close_friends">("public");
@@ -1157,39 +1116,69 @@ export default function App() {
     }
   };
 
-  // Filter visible stories based on location and friendship
-  const visibleStories = mergedStories.filter(story => {
-    // Show own stories always
-    if (story.userId === myProfile.id) return true;
+  // Filter visible stories based on location, privacy, and active view context
+  const radarStories = useMemo(() => {
+    return mergedStories.filter(story => {
+      // Only show public stories/posts in Radar Stories Feed
+      if (story.type !== "public" && story.type !== "nearby_public") return false;
 
-    // Check friendship status
-    const conn = connectionsData[story.userId];
-    const isFriend = conn && conn.status === "accepted";
+      // Show own public stories always
+      if (story.userId === myProfile.id) return true;
 
-    // 1. Close Friends Stories
-    if (story.type === "close_friends") {
-      // If designated via array, we must be in it
-      if (story.closeFriendIds && Array.isArray(story.closeFriendIds)) {
-        return story.closeFriendIds.includes(myProfile.id);
+      const dist = calculateDistance(
+        myProfile.latitude || 37.7749,
+        myProfile.longitude || -122.4194,
+        story.latitude || 37.7749,
+        story.longitude || -122.4194
+      );
+
+      if (publicPostsScope === "nearby") {
+        // Both "public" and "nearby_public" are only visible if nearby
+        return dist <= searchRadius;
+      } else {
+        // publicPostsScope === "global":
+        // "public" (Global Public) can be seen by anyone.
+        // "nearby_public" (Nearby Public) can ONLY be seen by nearby users.
+        if (story.type === "nearby_public") {
+          return dist <= searchRadius;
+        }
+        return true; // Global public is seen by anyone
       }
-      // Symmetrical simulation fallback (they are a friend and we have marked them as Close Friend)
-      return isFriend && closeFriendIds.includes(story.userId);
-    }
+    });
+  }, [mergedStories, publicPostsScope, myProfile.latitude, myProfile.longitude, searchRadius, myProfile.id]);
 
-    // 2. Friends Stories (including backward-compatible "private" type)
-    if (story.type === "friends" || (story.type as string) === "private") {
+  const shareStories = useMemo(() => {
+    return mergedStories.filter(story => {
+      // ONLY private or friends only stories, no public posts of any kind
+      if (story.type === "public" || story.type === "nearby_public") return false;
+
+      // Show own stories always
+      if (story.userId === myProfile.id) return true;
+
+      // Check friendship status
+      const conn = connectionsData[story.userId];
+      const isFriend = conn && conn.status === "accepted";
+
+      // 1. Close Friends Stories
+      if (story.type === "close_friends") {
+        if (story.closeFriendIds && Array.isArray(story.closeFriendIds)) {
+          return story.closeFriendIds.includes(myProfile.id);
+        }
+        return isFriend && closeFriendIds.includes(story.userId);
+      }
+
+      // 2. Friends Stories (including private)
       return isFriend;
-    }
+    });
+  }, [mergedStories, connectionsData, closeFriendIds, myProfile.id]);
 
-    // 3. Public stories are visible ONLY within the poster's local area (radar radius)
-    const dist = calculateDistance(
-      myProfile.latitude || 37.7749,
-      myProfile.longitude || -122.4194,
-      story.latitude || 37.7749,
-      story.longitude || -122.4194
-    );
-    return dist <= searchRadius;
-  });
+  const visibleStories = useMemo(() => {
+    if (mobileDemoTab === "share") {
+      return shareStories;
+    } else {
+      return radarStories;
+    }
+  }, [mobileDemoTab, shareStories, radarStories]);
 
   // Radians to match people dynamically
   const filteredPeople = nearbyPeople.filter(person => {
@@ -2433,7 +2422,7 @@ export default function App() {
                       {/* Story privacy selector */}
                       <div className="flex flex-col gap-1 mt-1">
                         <label className="text-[10px] font-bold text-[#64748B] uppercase tracking-wider">Who can view this story?</label>
-                        <div className="grid grid-cols-3 gap-1.5 mt-1">
+                        <div className="grid grid-cols-2 gap-1.5 mt-1">
                           <button
                             type="button"
                             onClick={() => setNewStoryType("public")}
@@ -2445,7 +2434,21 @@ export default function App() {
                             id="btn-story-type-public"
                           >
                             <Globe className="w-2.5 h-2.5" />
-                            Public
+                            Global Public
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => setNewStoryType("nearby_public")}
+                            className={`py-1.5 px-1.5 rounded-lg text-[9px] font-bold flex items-center justify-center gap-1 border transition-all cursor-pointer ${
+                              newStoryType === "nearby_public"
+                                ? "bg-indigo-600 border-indigo-600 text-white shadow-sm"
+                                : "bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100"
+                            }`}
+                            id="btn-story-type-nearby-public"
+                          >
+                            <Map className="w-2.5 h-2.5" />
+                            Nearby Public
                           </button>
 
                           <button
@@ -2481,13 +2484,19 @@ export default function App() {
                           {newStoryType === "public" && (
                             <p className="flex items-start gap-1">
                               <Globe className="w-3 h-3 text-blue-500 shrink-0 mt-0.5" />
-                              <span><strong>Public Scope:</strong> Broadcasted only to users located within your <strong>{searchRadius} km</strong> radar area.</span>
+                              <span><strong>Global Public:</strong> This post is published globally. <strong>Anyone using the app</strong> can discover and view it from their feed.</span>
+                            </p>
+                          )}
+                          {newStoryType === "nearby_public" && (
+                            <p className="flex items-start gap-1">
+                              <Map className="w-3 h-3 text-indigo-500 shrink-0 mt-0.5" />
+                              <span><strong>Nearby Public:</strong> Broadcasted <strong>only to users located within your local radar area ({searchRadius} km)</strong>. Users outside your radius cannot view it.</span>
                             </p>
                           )}
                           {newStoryType === "friends" && (
                             <p className="flex items-start gap-1">
                               <Users className="w-3 h-3 text-amber-500 shrink-0 mt-0.5" />
-                              <span><strong>Friends Scope:</strong> Securely shared <strong>only with your accepted friends</strong>. Non-friends won't see it on their radar feed.</span>
+                              <span><strong>Friends Scope:</strong> Private story shared <strong>only with your accepted friends</strong>. Non-friends won't see it on their feed.</span>
                             </p>
                           )}
                           {newStoryType === "close_friends" && (
@@ -2679,19 +2688,59 @@ export default function App() {
                 
                 {/* 2A. Instagram-like Stories Tray */}
                 <div className={`bg-white rounded-xl border border-[#E2E8F0] p-4 flex flex-col gap-3 shadow-sm ${(mobileDemoTab === "radar" || mobileDemoTab === "share") ? "flex" : "hidden lg:flex"}`} id="stories-tray-panel">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[10px] font-bold text-[#64748B] uppercase tracking-wider flex items-center gap-1.5">
-                      <Camera className="w-3.5 h-3.5 text-pink-600" />
-                      Nearby Stories Feed
-                    </span>
-                    <span className="text-[9px] bg-pink-100 text-pink-800 font-bold px-2 py-0.5 rounded-full uppercase tracking-wider">
-                      24h Expiring
-                    </span>
+                  <div className="flex flex-col gap-2.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-bold text-[#64748B] uppercase tracking-wider flex items-center gap-1.5">
+                        {mobileDemoTab === "share" ? (
+                          <>
+                            <Lock className="w-3.5 h-3.5 text-amber-600 animate-pulse" />
+                            Private & Friends Stories Feed
+                          </>
+                        ) : (
+                          <>
+                            <Globe className="w-3.5 h-3.5 text-blue-600 animate-pulse" />
+                            Public Posts Feed (X/Twitter-style)
+                          </>
+                        )}
+                      </span>
+                      <span className="text-[9px] bg-pink-100 text-pink-800 font-bold px-2 py-0.5 rounded-full uppercase tracking-wider">
+                        24h Expiring
+                      </span>
+                    </div>
+
+                    {mobileDemoTab !== "share" && (
+                      <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-lg self-start">
+                        <button
+                          type="button"
+                          onClick={() => setPublicPostsScope("nearby")}
+                          className={`px-2.5 py-1 rounded text-[9px] font-bold uppercase tracking-wider transition-all cursor-pointer ${
+                            publicPostsScope === "nearby"
+                              ? "bg-blue-600 text-white shadow-sm"
+                              : "text-slate-600 hover:text-slate-900"
+                          }`}
+                        >
+                          Nearby Posts Only
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setPublicPostsScope("global")}
+                          className={`px-2.5 py-1 rounded text-[9px] font-bold uppercase tracking-wider transition-all cursor-pointer ${
+                            publicPostsScope === "global"
+                              ? "bg-blue-600 text-white shadow-sm"
+                              : "text-slate-600 hover:text-slate-900"
+                          }`}
+                        >
+                          Global Public Posts
+                        </button>
+                      </div>
+                    )}
                   </div>
 
                   {visibleStories.length === 0 ? (
                     <div className="text-center py-4 bg-slate-50 rounded-lg border border-dashed border-slate-200 text-slate-500 text-[11px] font-medium">
-                      No recent stories shared nearby. Be the first to share a story!
+                      {mobileDemoTab === "share" 
+                        ? "No private or friends-only stories shared yet." 
+                        : `No public posts in ${publicPostsScope === "nearby" ? "your nearby area" : "the app"} yet. Be the first to post!`}
                     </div>
                   ) : (
                     <div className="flex items-center gap-3.5 overflow-x-auto pb-1 scrollbar-thin scrollbar-thumb-slate-200 scrollbar-track-transparent">

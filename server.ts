@@ -283,7 +283,7 @@ app.get("/api/giphy-tenor/search", async (req, res) => {
 
 // Vite middleware / Static Asset Setup
 async function setupViteOrStatic() {
-  const isProduction = process.env.NODE_ENV === "production" || __filename.endsWith("server.cjs");
+  const isProduction = process.env.NODE_ENV === "production" || (typeof __filename !== "undefined" && __filename.endsWith("server.cjs"));
 
   if (!isProduction) {
     console.log("Setting up Vite middleware for development...");
