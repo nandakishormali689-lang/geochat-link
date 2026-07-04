@@ -5,10 +5,10 @@ import {
   Send, Shield, CheckCircle, Copy, Check, Users, MessageCircle, AlertCircle, 
   Volume2, Video, PhoneOff, MicOff, Mic, Smile, Paperclip, Trash2, Languages,
   ChevronRight, Sparkles, Play, Square, Info, RefreshCw, X, Palette, Clock, Film, Plus,
-  Star, ChevronLeft, Pause, LogOut
+  Star, ChevronLeft, Pause, LogOut, Heart
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
-import { StackFeature, ChatMessage, NearbyUser, CallState, Story } from "./types";
+import { StackFeature, ChatMessage, NearbyUser, CallState, Story, Post } from "./types";
 import { STACK_FEATURES, INITIAL_NEARBY_USERS, INITIAL_COMMUNITIES, INTERESTS_LIST } from "./data";
 import { initializeApp } from "firebase/app";
 import { 
@@ -234,6 +234,43 @@ export default function App() {
     return [];
   });
 
+  // Scrollable persistent Posts state with local fallback
+  const [posts, setPosts] = useState<Post[]>([]);
+  const [localPosts, setLocalPosts] = useState<Post[]>(() => {
+    try {
+      const saved = localStorage.getItem("geochat_local_posts");
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        const now = new Date().getTime();
+        return parsed.map((p: any) => ({
+          ...p,
+          timestamp: new Date(p.timestamp)
+        })).filter((p: Post) => {
+          if (p.expirationHours && p.expirationHours > 0) {
+            const hrsDiff = (now - p.timestamp.getTime()) / (1000 * 60 * 60);
+            return hrsDiff < p.expirationHours;
+          }
+          return true;
+        });
+      }
+    } catch (e) {}
+    return [];
+  });
+
+  const [shareTabMode, setShareTabMode] = useState<"post" | "story">("post");
+  const [newPostContent, setNewPostContent] = useState("");
+  const [newPostType, setNewPostType] = useState<"public" | "nearby_public">("nearby_public");
+  const [newPostExpiration, setNewPostExpiration] = useState<number>(0); // 0 = never
+  const [isSubmittingPost, setIsSubmittingPost] = useState(false);
+  const [postMediaFile, setPostMediaFile] = useState<File | null>(null);
+  const [postMediaUrl, setPostMediaUrl] = useState<string>("");
+  const [postMediaType, setPostMediaType] = useState<"image" | "video" | undefined>(undefined);
+  const [postMediaPreview, setPostMediaPreview] = useState<string>("");
+
+  useEffect(() => {
+    localStorage.setItem("geochat_local_posts", JSON.stringify(localPosts));
+  }, [localPosts]);
+
   useEffect(() => {
     localStorage.setItem("geochat_local_stories", JSON.stringify(localStories));
   }, [localStories]);
@@ -285,6 +322,27 @@ export default function App() {
       return timeB - timeA;
     });
   }, [stories, localStories]);
+
+  const mergedPosts = useMemo(() => {
+    const all = [...posts, ...localPosts];
+    const uniq: Post[] = [];
+    all.forEach(p => {
+      const isDuplicate = uniq.some(existing => 
+        existing.id === p.id || 
+        (existing.userId === p.userId && 
+         existing.content === p.content && 
+         Math.abs(new Date(existing.timestamp).getTime() - new Date(p.timestamp).getTime()) < 300000)
+      );
+      if (!isDuplicate) {
+        uniq.push(p);
+      }
+    });
+    return uniq.sort((a, b) => {
+      const timeA = a.timestamp instanceof Date ? a.timestamp.getTime() : new Date(a.timestamp).getTime();
+      const timeB = b.timestamp instanceof Date ? b.timestamp.getTime() : new Date(b.timestamp).getTime();
+      return timeB - timeA;
+    });
+  }, [posts, localPosts]);
 
   const [newStoryContent, setNewStoryContent] = useState("");
   const [newStoryType, setNewStoryType] = useState<"public" | "friends" | "close_friends">("public");
@@ -662,6 +720,51 @@ export default function App() {
       setStories(list);
     }, (err) => {
       console.error("Stories snapshot error:", err);
+    });
+    return () => unsubscribe();
+  }, [db, authUser, myProfile.id]);
+
+  // Real-time Listener for ALL Posts in Firestore
+  useEffect(() => {
+    if (!db || !authUser || !myProfile.id) return;
+    const q = query(collection(db, "posts"));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const list: Post[] = [];
+      const now = new Date().getTime();
+      snapshot.forEach((doc) => {
+        const data = doc.data();
+        const postTime = data.timestamp?.toDate() || new Date();
+        
+        let expired = false;
+        if (data.expirationHours && data.expirationHours > 0) {
+          const hrsDiff = (now - postTime.getTime()) / (1000 * 60 * 60);
+          if (hrsDiff >= data.expirationHours) {
+            expired = true;
+          }
+        }
+        
+        if (!expired) {
+          list.push({
+            id: doc.id,
+            userId: data.userId || "",
+            userName: data.userName || "",
+            avatar: data.avatar || "",
+            content: data.content || "",
+            type: data.type || "public",
+            timestamp: postTime,
+            latitude: data.latitude || 37.7749,
+            longitude: data.longitude || -122.4194,
+            mediaUrl: data.mediaUrl || undefined,
+            mediaType: data.mediaType || undefined,
+            expirationHours: data.expirationHours || 0,
+            likes: data.likes || []
+          });
+        }
+      });
+      list.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
+      setPosts(list);
+    }, (err) => {
+      console.error("Posts snapshot error:", err);
     });
     return () => unsubscribe();
   }, [db, authUser, myProfile.id]);
@@ -1054,7 +1157,7 @@ export default function App() {
     setIsSubmittingStory(true);
     
     const avatarUrl = `https://api.dicebear.com/7.x/adventurer/svg?seed=${myProfile.avatarSeed}`;
-    const newStoryId = `story_${Math.random().toString(36).substring(2, 9)}`;
+    const initialStoryId = `story_${Math.random().toString(36).substring(2, 9)}`;
     const now = new Date();
 
     const userId = myProfile.id;
@@ -1064,7 +1167,7 @@ export default function App() {
     const longitude = myProfile.longitude || -122.4194;
     
     const storyPayload: Story = {
-      id: newStoryId,
+      id: initialStoryId,
       userId: userId,
       userName: userName,
       avatar: avatar,
@@ -1078,13 +1181,19 @@ export default function App() {
       closeFriendIds: newStoryType === "close_friends" ? closeFriendIds : undefined
     };
 
-    // 1. Instantly save to local fallback state so that it shows up for the user immediately!
-    setLocalStories(prev => [storyPayload, ...prev]);
-
-    // 2. Try to sync to Firestore
+    // Try to sync to Firestore, otherwise save locally
     try {
       if (db) {
-        await addDoc(collection(db, "stories"), {
+        const storiesRef = collection(db, "stories");
+        const newDocRef = doc(storiesRef);
+        const firestoreId = newDocRef.id;
+        
+        // Update story ID with Firestore doc ID to prevent duplicates!
+        storyPayload.id = firestoreId;
+        setLocalStories(prev => [storyPayload, ...prev]);
+
+        await setDoc(newDocRef, {
+          id: firestoreId,
           userId: storyPayload.userId,
           userName: storyPayload.userName,
           avatar: storyPayload.avatar,
@@ -1099,11 +1208,12 @@ export default function App() {
         });
         triggerAlert("Story was shared successfully!", "success");
       } else {
+        setLocalStories(prev => [storyPayload, ...prev]);
         triggerAlert("Firestore not connected. Story saved in your local session!", "info");
       }
     } catch (err) {
       console.error("Failed to share story to Cloud Firestore:", err);
-      // Still show success-info since we have local storage fallback!
+      setLocalStories(prev => [storyPayload, ...prev]);
       triggerAlert("Cloud database offline. Saved in local session!", "info");
     } finally {
       // Clear inputs
@@ -1113,6 +1223,154 @@ export default function App() {
       setStoryMediaType(undefined);
       setStoryMediaPreview("");
       setIsSubmittingStory(false);
+    }
+  };
+
+  // Create public/nearby Post and sync to Firestore
+  const handlePostSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newPostContent.trim() || !myProfile.id) return;
+    setIsSubmittingPost(true);
+    
+    const avatarUrl = `https://api.dicebear.com/7.x/adventurer/svg?seed=${myProfile.avatarSeed}`;
+    const initialPostId = `post_${Math.random().toString(36).substring(2, 9)}`;
+    const now = new Date();
+
+    const postPayload: Post = {
+      id: initialPostId,
+      userId: myProfile.id,
+      userName: myProfile.name,
+      avatar: avatarUrl,
+      content: newPostContent.trim(),
+      type: newPostType,
+      timestamp: now,
+      latitude: myProfile.latitude || 37.7749,
+      longitude: myProfile.longitude || -122.4194,
+      mediaUrl: postMediaUrl || undefined,
+      mediaType: postMediaType || undefined,
+      expirationHours: newPostExpiration,
+      likes: []
+    };
+
+    try {
+      if (db) {
+        const postsRef = collection(db, "posts");
+        const newDocRef = doc(postsRef);
+        const firestoreId = newDocRef.id;
+
+        postPayload.id = firestoreId;
+        setLocalPosts(prev => [postPayload, ...prev]);
+
+        await setDoc(newDocRef, {
+          id: firestoreId,
+          userId: postPayload.userId,
+          userName: postPayload.userName,
+          avatar: postPayload.avatar,
+          content: postPayload.content,
+          type: postPayload.type,
+          timestamp: serverTimestamp(),
+          latitude: postPayload.latitude,
+          longitude: postPayload.longitude,
+          mediaUrl: postPayload.mediaUrl || null,
+          mediaType: postPayload.mediaType || null,
+          expirationHours: postPayload.expirationHours,
+          likes: []
+        });
+        triggerAlert("Post was published successfully!", "success");
+      } else {
+        setLocalPosts(prev => [postPayload, ...prev]);
+        triggerAlert("Firestore not connected. Post saved in your local session!", "info");
+      }
+    } catch (err) {
+      console.error("Failed to share post to Cloud Firestore:", err);
+      setLocalPosts(prev => [postPayload, ...prev]);
+      triggerAlert("Cloud database offline. Saved in local session!", "info");
+    } finally {
+      // Clear inputs
+      setNewPostContent("");
+      setPostMediaFile(null);
+      setPostMediaUrl("");
+      setPostMediaType(undefined);
+      setPostMediaPreview("");
+      setIsSubmittingPost(false);
+      setMobileDemoTab("radar"); // Switch back to posts tab
+    }
+  };
+
+  // Delete a post
+  const handleDeletePost = async (postId: string) => {
+    if (!postId) return;
+    
+    setLocalPosts(prev => prev.filter(p => p.id !== postId));
+    setPosts(prev => prev.filter(p => p.id !== postId));
+
+    try {
+      if (db) {
+        // Try deleting by document ID directly (if id is doc.id)
+        await deleteDoc(doc(db, "posts", postId));
+        
+        // Also query to make sure if it was saved with a custom id field
+        const q = query(collection(db, "posts"), where("id", "==", postId));
+        const querySnapshot = await getDocs(q);
+        const deletePromises = querySnapshot.docs.map(docSnap => deleteDoc(doc(db, "posts", docSnap.id)));
+        await Promise.all(deletePromises);
+      }
+      triggerAlert("Post deleted successfully!", "success");
+    } catch (err) {
+      console.error("Failed to delete post from Firestore:", err);
+      triggerAlert("Removed post from local view!", "info");
+    }
+  };
+
+  // Toggle like
+  const handleToggleLike = async (postId: string) => {
+    if (!postId || !myProfile.id) return;
+
+    // Toggle locally first
+    setLocalPosts(prev => prev.map(p => {
+      if (p.id === postId) {
+        const likes = p.likes || [];
+        const updatedLikes = likes.includes(myProfile.id)
+          ? likes.filter(id => id !== myProfile.id)
+          : [...likes, myProfile.id];
+        return { ...p, likes: updatedLikes };
+      }
+      return p;
+    }));
+
+    setPosts(prev => prev.map(p => {
+      if (p.id === postId) {
+        const likes = p.likes || [];
+        const updatedLikes = likes.includes(myProfile.id)
+          ? likes.filter(id => id !== myProfile.id)
+          : [...likes, myProfile.id];
+        return { ...p, likes: updatedLikes };
+      }
+      return p;
+    }));
+
+    try {
+      if (db) {
+        const q = query(collection(db, "posts"));
+        const snapshot = await getDocs(q);
+        let docId = null;
+        let currentLikes: string[] = [];
+        snapshot.forEach((doc) => {
+          if (doc.id === postId || doc.data().id === postId) {
+            docId = doc.id;
+            currentLikes = doc.data().likes || [];
+          }
+        });
+
+        if (docId) {
+          const updatedLikes = currentLikes.includes(myProfile.id)
+            ? currentLikes.filter(id => id !== myProfile.id)
+            : [...currentLikes, myProfile.id];
+          await updateDoc(doc(db, "posts", docId), { likes: updatedLikes });
+        }
+      }
+    } catch (err) {
+      console.error("Error toggling like:", err);
     }
   };
 
@@ -1176,9 +1434,32 @@ export default function App() {
     if (mobileDemoTab === "share") {
       return shareStories;
     } else {
-      return radarStories;
+      return shareStories; // Always show private/friends-only stories in the stories tray!
     }
-  }, [mobileDemoTab, shareStories, radarStories]);
+  }, [mobileDemoTab, shareStories]);
+
+  const radarPosts = useMemo(() => {
+    return mergedPosts.filter(post => {
+      if (post.type !== "public" && post.type !== "nearby_public") return false;
+      if (post.userId === myProfile.id) return true;
+
+      const dist = calculateDistance(
+        myProfile.latitude || 37.7749,
+        myProfile.longitude || -122.4194,
+        post.latitude || 37.7749,
+        post.longitude || -122.4194
+      );
+
+      if (publicPostsScope === "nearby") {
+        return dist <= searchRadius;
+      } else {
+        if (post.type === "nearby_public") {
+          return dist <= searchRadius;
+        }
+        return true;
+      }
+    });
+  }, [mergedPosts, publicPostsScope, myProfile.latitude, myProfile.longitude, searchRadius, myProfile.id]);
 
   // Radians to match people dynamically
   const filteredPeople = nearbyPeople.filter(person => {
@@ -2571,55 +2852,8 @@ export default function App() {
                   </div>
                 )}
 
-                {/* 2. Standout Radar Matcher Controls Panel */}
-                <div className={`bg-white rounded-xl border border-[#E2E8F0] overflow-hidden flex flex-col shadow-sm ${mobileDemoTab === "friends" ? "flex" : "hidden lg:flex"}`}>
-                  <div className="bg-[#F1F5F9] px-4 py-3 border-b border-[#E2E8F0] text-xs font-bold uppercase tracking-wider text-[#64748B] flex items-center justify-between">
-                    <h3 className="text-xs font-extrabold uppercase tracking-wider text-[#64748B] flex items-center gap-1.5">
-                      <Compass className="w-3.5 h-3.5 text-[#2563EB]" />
-                      Radar Radius Settings
-                    </h3>
-                    <span className="text-[10px] font-bold text-[#1E40AF] bg-[#DBEAFE] px-2.5 py-0.5 rounded-full uppercase tracking-wider">{searchRadius} km</span>
-                  </div>
-
-                  <div className="p-4 flex flex-col gap-4">
-                    {/* Distance Radius Slider */}
-                    <div className="flex flex-col gap-2">
-                      <div className="flex items-center justify-between text-xs text-[#64748B] font-bold uppercase tracking-wider">
-                        <span>Radius Limit</span>
-                        <span className="font-mono text-[#2563EB] font-bold">{searchRadius} km max</span>
-                      </div>
-                      <input 
-                        type="range" 
-                        id="range-radius-slider"
-                        min="1" 
-                        max="10" 
-                        value={searchRadius}
-                        onChange={(e) => {
-                          setSearchRadius(Number(e.target.value));
-                          triggerAlert(`Matched users recalculated within ${e.target.value} km radius!`, "info");
-                        }}
-                        className="w-full accent-[#2563EB] cursor-pointer h-1.5 bg-[#F1F5F9] rounded-lg appearance-none"
-                      />
-                      <div className="flex items-center justify-between text-[10px] text-[#64748B] font-mono">
-                        <span>1 km</span>
-                        <span>5 km</span>
-                        <span>10 km</span>
-                      </div>
-                    </div>
-
-                    {/* Info Notice about Privacy with Promo style */}
-                    <div className="bg-[#EFF6FF] border border-[#BFDBFE] rounded-lg p-3.5 flex gap-2.5 text-xs text-[#1E40AF] leading-relaxed font-medium">
-                      <Shield className="w-4 h-4 text-[#2563EB] shrink-0 mt-0.5" />
-                      <div>
-                        <strong className="font-bold block uppercase tracking-wider text-[#1E40AF] mb-1">Privacy First Protocol</strong>
-                        Shows only general distances (e.g., ~1.4 km) instead of specific locations. Your exact location coordinates are kept 100% hidden.
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
                 {/* 3. Joined Communities Feed Channels Panel */}
-                <div className={`bg-white rounded-xl border border-[#E2E8F0] overflow-hidden flex flex-col shadow-sm ${mobileDemoTab === "radar" ? "flex" : "hidden lg:flex"}`}>
+                <div className={`bg-white rounded-xl border border-[#E2E8F0] overflow-hidden flex flex-col shadow-sm ${mobileDemoTab === "friends" ? "flex" : "hidden lg:flex"}`}>
                   <div className="bg-[#F1F5F9] px-4 py-3 border-b border-[#E2E8F0] text-xs font-bold uppercase tracking-wider text-[#64748B] flex items-center">
                     <span className="font-bold flex items-center gap-1.5">📢 Joined Group Feeds</span>
                   </div>
@@ -2813,121 +3047,159 @@ export default function App() {
                     </div>
                   )}
                 </div>
-                
-                {/* Visual locator radar map schematic */}
+
+                {/* Posts Feed Section */}
                 <div className={`bg-white rounded-xl border border-[#E2E8F0] overflow-hidden flex flex-col shadow-sm ${mobileDemoTab === "radar" ? "flex" : "hidden lg:flex"}`}>
-                  <div className="bg-[#F1F5F9] px-4 py-3 border-b border-[#E2E8F0] text-xs font-bold uppercase tracking-wider text-[#64748B] flex items-center justify-between">
-                    <h3 className="text-xs font-extrabold uppercase tracking-wider text-[#64748B] flex items-center gap-2">
-                      <div className="w-2.5 h-2.5 rounded-full bg-[#10B981] animate-pulse"></div>
-                      Schematic Social Radar ({filteredPeople.length} Online nearby)
+                  <div className="bg-[#F8FAFC] px-4 py-3 border-b border-[#E2E8F0] flex items-center justify-between">
+                    <h3 className="text-xs font-extrabold uppercase tracking-wider text-[#1E293B] flex items-center gap-1.5">
+                      <MessageSquare className="w-3.5 h-3.5 text-[#2563EB]" />
+                      Public Posts Timeline
                     </h3>
-                    <span className="text-[10px] bg-slate-200 text-[#1E293B] font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wider">Approximate Only</span>
-                  </div>
-
-                  {/* Real-time GPS & Nominatim Locator Panel */}
-                  <div className="bg-[#F8FAFC] border-b border-[#E2E8F0] px-4 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
-                    <div className="flex items-center gap-2.5">
-                      <div className="w-8 h-8 rounded-lg bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-600 shrink-0">
-                        <Compass className={`w-4 h-4 ${isLocating ? 'animate-spin' : ''}`} />
-                      </div>
-                      <div>
-                        <span className="text-[9px] font-bold text-[#64748B] uppercase block tracking-wider">My Privacy-Safe Area</span>
-                        <span className="font-bold text-slate-800 leading-tight block">{userLocatedArea}</span>
-                      </div>
+                    <div className="flex bg-[#F1F5F9] rounded-lg p-0.5 border border-[#E2E8F0]">
+                      <button
+                        onClick={() => setPublicPostsScope("nearby")}
+                        className={`py-1 px-2.5 rounded-md text-[9px] font-bold uppercase tracking-wider flex items-center gap-1 cursor-pointer transition-all ${
+                          publicPostsScope === "nearby"
+                            ? "bg-white text-[#1E293B] shadow-sm"
+                            : "text-[#64748B] hover:text-[#1E293B]"
+                        }`}
+                      >
+                        <Map className="w-2.5 h-2.5" />
+                        Nearby
+                      </button>
+                      <button
+                        onClick={() => setPublicPostsScope("global")}
+                        className={`py-1 px-2.5 rounded-md text-[9px] font-bold uppercase tracking-wider flex items-center gap-1 cursor-pointer transition-all ${
+                          publicPostsScope === "global"
+                            ? "bg-white text-[#1E293B] shadow-sm"
+                            : "text-[#64748B] hover:text-[#1E293B]"
+                        }`}
+                      >
+                        <Globe className="w-2.5 h-2.5" />
+                        Global
+                      </button>
                     </div>
-                    <button
-                      onClick={handleLocateMe}
-                      disabled={isLocating}
-                      className="px-3.5 py-1.5 rounded-lg bg-indigo-600 text-white font-bold tracking-wider hover:bg-indigo-700 transition-colors flex items-center justify-center gap-1.5 disabled:bg-indigo-400 self-start sm:self-auto cursor-pointer text-[10px] uppercase shadow-sm"
-                    >
-                      {isLocating ? (
-                        <>
-                          <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                          Locating...
-                        </>
-                      ) : (
-                        <>
-                          <Map className="w-3.5 h-3.5" />
-                          Locate Me
-                        </>
-                      )}
-                    </button>
                   </div>
 
-                  {/* Interactive radar SVG Canvas */}
-                  <div className="p-4">
-                    <div className="w-full bg-[#0F172A] aspect-square rounded-lg relative overflow-hidden flex items-center justify-center border border-slate-800">
-                      
-                      {/* Radar swept animation scanner */}
-                      <div className="absolute inset-0 bg-[conic-gradient(from_0deg,transparent_10%,rgba(99,102,241,0.15)_90%,rgba(99,102,241,0.4)_100%)] rounded-full animate-[spin_6s_linear_infinite] origin-center pointer-events-none"></div>
-
-                      {/* Concentric rings */}
-                      <div className="absolute w-[80%] h-[80%] border border-slate-800/80 rounded-full flex items-center justify-center pointer-events-none">
-                        <div className="absolute w-[70%] h-[70%] border border-slate-800/60 rounded-full flex items-center justify-center">
-                          <div className="absolute w-[45%] h-[45%] border border-slate-800/40 rounded-full flex items-center justify-center">
-                            <div className="absolute w-[20%] h-[20%] border border-indigo-500/20 rounded-full"></div>
-                          </div>
-                        </div>
+                  <div className="p-4 flex flex-col gap-4 overflow-y-auto max-h-[720px] scrollbar-thin">
+                    {radarPosts.length === 0 ? (
+                      <div className="text-center py-10 bg-[#F8FAFC] rounded-lg border border-dashed border-[#E2E8F0] p-6 text-slate-500 text-xs font-semibold flex flex-col items-center justify-center gap-2">
+                        <MessageSquare className="w-8 h-8 text-slate-300" />
+                        <p>No public posts in {publicPostsScope === "nearby" ? "your nearby area" : "the app"} yet.</p>
+                        <button
+                          onClick={() => setMobileDemoTab("share")}
+                          className="mt-2 px-3 py-1.5 bg-[#2563EB] hover:bg-[#1D4ED8] text-white rounded-lg text-[10px] uppercase font-bold tracking-wider cursor-pointer"
+                        >
+                          Create First Post
+                        </button>
                       </div>
-
-                      {/* Horizontal & Vertical Crosshairs */}
-                      <div className="absolute h-full w-px bg-slate-800/60 pointer-events-none"></div>
-                      <div className="absolute w-full h-px bg-slate-800/60 pointer-events-none"></div>
-
-                      {/* Radar Center (You!) */}
-                      <div className="absolute z-10 w-6 h-6 rounded-full bg-indigo-500/20 border border-indigo-400 flex items-center justify-center shadow-md shadow-indigo-500/20 animate-pulse">
-                        <div className="w-2.5 h-2.5 rounded-full bg-indigo-400"></div>
-                        <span className="absolute -bottom-5 text-[9px] font-bold text-indigo-400 whitespace-nowrap">{myProfile.name} (You)</span>
-                      </div>
-
-                      {/* Nearby users mapped onto coordinate spaces based on distance */}
-                      {filteredPeople.map((person, idx) => {
-                        // Map distances to radii. Since searchRadius changes, distances are scaled to fit visual radius nicely
-                        const maxVisualDistance = searchRadius;
-                        const relativeDistance = person.distance / maxVisualDistance;
-                        const visualPercentage = relativeDistance * 45; // Max 45% radius from center
-
-                        // Give each idx a fixed angle to avoid random movements on state updates
-                        const angles = [35, 140, 210, 290, 325];
-                        const angle = angles[idx % angles.length] * (Math.PI / 180);
-                        
-                        const x = Math.cos(angle) * visualPercentage;
-                        const y = Math.sin(angle) * visualPercentage;
-
+                    ) : (
+                      radarPosts.map((post) => {
+                        const isOwn = post.userId === myProfile.id;
+                        const hasLiked = post.likes?.includes(myProfile.id);
                         return (
-                          <motion.button
-                            initial={{ opacity: 0, scale: 0.5 }}
-                            animate={{ opacity: 1, scale: 1 }}
-                            key={person.id}
-                            id={`radar-node-${person.id}`}
-                            onClick={() => {
-                              setActiveChatId(person.id);
-                              triggerAlert(`Viewing detail card for ${person.name}`, "info");
-                            }}
-                            style={{
-                              left: `calc(50% + ${x}% - 14px)`,
-                              top: `calc(50% + ${y}% - 14px)`,
-                            }}
-                            className={`absolute z-10 p-0.5 rounded-xl border transition-all hover:scale-125 hover:z-20 ${
-                              activeChatId === person.id 
-                                ? "bg-indigo-600 border-indigo-400 shadow-lg shadow-indigo-500/40" 
-                                : "bg-slate-800 border-slate-700 text-slate-300"
-                            }`}
+                          <div
+                            key={post.id}
+                            className="bg-white border border-[#E2E8F0] rounded-xl overflow-hidden shadow-sm hover:shadow transition-shadow flex flex-col animate-fade-in"
                           >
-                            <img 
-                              src={person.avatar} 
-                              alt={person.name} 
-                              className="w-6 h-6 rounded-lg bg-slate-900"
-                              referrerPolicy="no-referrer"
-                            />
-                            {/* Floating indicator */}
-                            <span className="absolute -bottom-4 left-1/2 transform -translate-x-1/2 text-[8px] px-1 rounded bg-slate-950/85 text-slate-200 font-mono whitespace-nowrap">
-                              ~{person.distance.toFixed(1)}km
-                            </span>
-                          </motion.button>
+                            {/* Header: Senders info top */}
+                            <div className="px-4 py-3 bg-[#F8FAFC]/50 border-b border-[#F1F5F9] flex items-center justify-between">
+                              <div className="flex items-center gap-2.5">
+                                <img
+                                  src={post.avatar}
+                                  alt={post.userName}
+                                  className="w-8 h-8 rounded-full border border-slate-200"
+                                  referrerPolicy="no-referrer"
+                                />
+                                <div>
+                                  <span className="text-xs font-bold text-slate-800 block leading-tight">{post.userName}</span>
+                                  <div className="flex items-center gap-1.5 mt-0.5">
+                                    <span className="text-[9px] text-slate-400 font-medium">
+                                      {post.timestamp instanceof Date 
+                                        ? post.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) 
+                                        : new Date(post.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                    </span>
+                                    <span className="text-[9px] text-slate-300">•</span>
+                                    {post.type === "global" || post.type === "public" ? (
+                                      <span className="text-[8px] bg-blue-50 text-blue-700 font-bold px-1.5 py-0.5 rounded flex items-center gap-0.5">
+                                        <Globe className="w-2 h-2" />
+                                        Global
+                                      </span>
+                                    ) : (
+                                      <span className="text-[8px] bg-indigo-50 text-indigo-700 font-bold px-1.5 py-0.5 rounded flex items-center gap-0.5">
+                                        <Map className="w-2 h-2" />
+                                        Nearby
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+
+                              {isOwn && (
+                                <button
+                                  onClick={() => handleDeletePost(post.id)}
+                                  className="p-1 text-slate-400 hover:text-rose-600 rounded transition-colors cursor-pointer"
+                                  title="Delete post"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                            </div>
+
+                            {/* Description: Given below sender info */}
+                            <div className="px-4 py-3 text-xs text-slate-700 font-medium leading-relaxed break-words whitespace-pre-wrap">
+                              {post.content}
+                            </div>
+
+                            {/* Post Image: Attached below description, span full width */}
+                            {post.mediaUrl && (
+                              <div className="w-full bg-[#F8FAFC] border-t border-[#F1F5F9] max-h-96 overflow-hidden flex items-center justify-center">
+                                {post.mediaType === "video" ? (
+                                  <video
+                                    src={post.mediaUrl}
+                                    className="w-full h-auto object-contain max-h-96"
+                                    controls
+                                    playsInline
+                                    muted
+                                  />
+                                ) : (
+                                  <img
+                                    src={post.mediaUrl}
+                                    alt="Post media"
+                                    className="w-full h-auto object-contain max-h-96"
+                                    referrerPolicy="no-referrer"
+                                  />
+                                )}
+                              </div>
+                            )}
+
+                            {/* Footer: Likes and Lifetime */}
+                            <div className="px-4 py-2.5 bg-[#F8FAFC]/30 border-t border-[#F1F5F9] flex items-center justify-between text-[10px] text-slate-500 font-medium">
+                              <button
+                                onClick={() => handleToggleLike(post.id)}
+                                className={`flex items-center gap-1.5 py-1 px-2.5 rounded-lg transition-colors cursor-pointer ${
+                                  hasLiked 
+                                    ? "bg-rose-50 text-rose-600 font-bold" 
+                                    : "bg-slate-50 hover:bg-slate-100 text-slate-600"
+                                }`}
+                              >
+                                <Heart className={`w-3.5 h-3.5 ${hasLiked ? "fill-rose-500 text-rose-500" : ""}`} />
+                                <span>{post.likes?.length || 0} Likes</span>
+                              </button>
+
+                              <div className="flex items-center gap-1 text-[9px] text-slate-400">
+                                <Clock className="w-3 h-3 text-slate-300" />
+                                <span>
+                                  {post.expirationHours && post.expirationHours > 0
+                                    ? `Expires in ${post.expirationHours}h`
+                                    : "Persistent (Never expires)"}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
                         );
-                      })}
-                    </div>
+                      })
+                    )}
                   </div>
                 </div>
 
@@ -3082,7 +3354,7 @@ export default function App() {
                 </div>
 
                 {/* Local interest-based communities listed */}
-                <div className={`bg-white rounded-xl border border-[#E2E8F0] overflow-hidden flex flex-col shadow-sm ${mobileDemoTab === "radar" ? "flex" : "hidden lg:flex"}`}>
+                <div className={`bg-white rounded-xl border border-[#E2E8F0] overflow-hidden flex flex-col shadow-sm ${mobileDemoTab === "friends" ? "flex" : "hidden lg:flex"}`}>
                   <div className="bg-[#F1F5F9] px-4 py-3 border-b border-[#E2E8F0] text-xs font-bold uppercase tracking-wider text-[#64748B] flex items-center justify-between">
                     <span className="font-bold flex items-center gap-1.5">🗺️ Local Communities ({filteredCommunities.length})</span>
                     <button

@@ -69,3 +69,20 @@ export interface Story {
   mediaType?: "image" | "video";
   closeFriendIds?: string[];
 }
+
+export interface Post {
+  id: string;
+  userId: string;
+  userName: string;
+  avatar: string;
+  content: string;
+  type: "public" | "nearby_public";
+  timestamp: Date;
+  latitude: number;
+  longitude: number;
+  mediaUrl?: string;
+  mediaType?: "image" | "video";
+  expirationHours?: number; // 0 for never, or 1, 12, 24, 72, 168 hours
+  likes?: string[];
+}
+

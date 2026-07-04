@@ -66,6 +66,27 @@
         "timestamp": { "type": "object" }
       },
       "required": ["senderId", "text"]
+    },
+    "Post": {
+      "title": "Post",
+      "description": "A scrollable persistent message or image posted globally or nearby",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "userName": { "type": "string" },
+        "avatar": { "type": "string" },
+        "content": { "type": "string" },
+        "type": { "type": "string", "enum": ["public", "nearby_public"] },
+        "timestamp": { "type": "object" },
+        "latitude": { "type": "number" },
+        "longitude": { "type": "number" },
+        "mediaUrl": { "type": "string" },
+        "mediaType": { "type": "string" },
+        "expirationHours": { "type": "number" },
+        "likes": { "type": "array", "items": { "type": "string" } }
+      },
+      "required": ["id", "userId", "userName", "avatar", "content", "type", "timestamp", "latitude", "longitude"]
     }
   },
   "firestore": {
@@ -88,6 +109,10 @@
     "/connections/{connectionId}/messages/{messageId}": {
       "schema": "Message",
       "description": "Direct messages sent in a 1-to-1 connection chat"
+    },
+    "/posts/{postId}": {
+      "schema": "Post",
+      "description": "Persistent public or local posts"
     }
   }
 }
