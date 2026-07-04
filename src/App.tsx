@@ -1434,9 +1434,9 @@ export default function App() {
     if (mobileDemoTab === "share") {
       return shareStories;
     } else {
-      return shareStories; // Always show private/friends-only stories in the stories tray!
+      return radarStories; // Show public/nearby public stories in the main stories tray!
     }
-  }, [mobileDemoTab, shareStories]);
+  }, [mobileDemoTab, shareStories, radarStories]);
 
   const radarPosts = useMemo(() => {
     return mergedPosts.filter(post => {
@@ -2802,6 +2802,219 @@ export default function App() {
                   </div>
                 </div>
 
+                {/* 1B-2. Share Public Post Panel */}
+                <div className={`bg-white rounded-xl border border-[#E2E8F0] overflow-hidden flex flex-col shadow-sm mt-6 ${mobileDemoTab === "share" ? "flex" : "hidden lg:flex"}`} id="share-post-panel">
+                  <div className="bg-[#F1F5F9] px-4 py-3 border-b border-[#E2E8F0] text-xs font-bold uppercase tracking-wider text-[#64748B] flex items-center justify-between">
+                    <h3 className="text-xs font-extrabold uppercase tracking-wider text-[#64748B] flex items-center gap-1.5">
+                      <MessageSquare className="w-3.5 h-3.5 text-blue-600 animate-pulse" />
+                      Create Public Post
+                    </h3>
+                    <span className="text-[10px] bg-blue-100 text-blue-800 font-bold px-2 py-0.5 rounded-full uppercase tracking-wider">Twitter/X Style</span>
+                  </div>
+
+                  <div className="p-4 flex flex-col gap-3">
+                    <form onSubmit={handlePostSubmit} className="flex flex-col gap-3.5">
+                      
+                      <div className="flex flex-col gap-1">
+                        <label className="text-[10px] font-bold text-[#64748B] uppercase tracking-wider flex items-center gap-1">
+                          <span>Post Text Content</span>
+                        </label>
+                        <textarea
+                          value={newPostContent}
+                          onChange={(e) => setNewPostContent(e.target.value.substring(0, 280))}
+                          placeholder="What's on your mind? Share a persistent public post with nearby users or globally! (Max 280 chars)"
+                          rows={3}
+                          className="bg-[#F8FAFC] border border-[#E2E8F0] rounded-lg px-2.5 py-1.5 text-xs font-semibold text-[#1E293B] focus:outline-none focus:border-blue-500 w-full resize-none"
+                          required
+                        />
+                        <span className="text-[8px] text-slate-400 font-bold text-right mt-0.5">
+                          {newPostContent.length}/280
+                        </span>
+                      </div>
+
+                      {/* File Upload Area for Images and Videos */}
+                      <div className="flex flex-col gap-1.5">
+                        <label className="text-[10px] font-bold text-[#64748B] uppercase tracking-wider flex items-center gap-1">
+                          <Paperclip className="w-3 h-3 text-blue-500" />
+                          <span>Attach Image or Video to Post</span>
+                        </label>
+                        
+                        <div className="flex items-center gap-2">
+                          <label className="flex-1 flex flex-col items-center justify-center border border-dashed border-slate-300 rounded-lg p-3 hover:bg-slate-50 transition-all cursor-pointer group text-center">
+                            <Plus className="w-4 h-4 text-slate-400 group-hover:text-blue-500 transition-colors" />
+                            <span className="text-[10px] font-bold text-slate-500 group-hover:text-blue-600 transition-colors mt-1">Upload File</span>
+                            <span className="text-[8px] text-slate-400 font-medium">Image or Video max 2MB</span>
+                            <input
+                              type="file"
+                              accept="image/*,video/*"
+                              className="hidden"
+                              onChange={(e) => {
+                                const file = e.target.files?.[0];
+                                if (!file) return;
+                                const isVideo = file.type.startsWith("video/");
+                                const isImg = file.type.startsWith("image/");
+                                if (!isVideo && !isImg) {
+                                  triggerAlert("Please select an image or video file.", "error");
+                                  return;
+                                }
+                                setPostMediaFile(file);
+                                setPostMediaType(isVideo ? "video" : "image");
+                                const previewUrl = URL.createObjectURL(file);
+                                setPostMediaPreview(previewUrl);
+                                
+                                if (file.size <= 2 * 1024 * 1024) {
+                                  const reader = new FileReader();
+                                  reader.onloadend = () => {
+                                    setPostMediaUrl(reader.result as string);
+                                  };
+                                  reader.readAsDataURL(file);
+                                } else {
+                                  setPostMediaUrl(previewUrl);
+                                }
+                                triggerAlert(`${file.name} attached to post successfully!`, "success");
+                              }}
+                            />
+                          </label>
+
+                          {/* Quick Unsplash / Mixkit Media Presets */}
+                          <div className="flex-1 flex flex-col gap-1">
+                            <span className="text-[8px] font-bold text-slate-400 uppercase tracking-wider">Presets:</span>
+                            <div className="grid grid-cols-2 gap-1">
+                              {STORY_PRESET_MEDIA.slice(1, 5).map((p) => (
+                                <button
+                                  key={`post-preset-${p.name}`}
+                                  type="button"
+                                  onClick={() => {
+                                    setPostMediaUrl(p.url);
+                                    setPostMediaType(p.type as any);
+                                    setPostMediaPreview(p.url);
+                                    triggerAlert(`Preset "${p.name}" selected for post!`, "success");
+                                  }}
+                                  className="py-1 px-1.5 border border-slate-200 hover:border-blue-300 rounded text-[9px] font-bold text-slate-600 bg-slate-50 hover:bg-blue-50 transition-all truncate text-left"
+                                  title={p.name}
+                                >
+                                  {p.name}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Media Preview Window */}
+                        {postMediaPreview && (
+                          <div className="relative mt-2 rounded-lg border border-slate-200 overflow-hidden bg-slate-50 max-h-40 flex items-center justify-center p-1 group">
+                            {postMediaType === "video" ? (
+                              <video
+                                src={postMediaPreview}
+                                className="max-h-36 max-w-full rounded object-contain"
+                                controls
+                                muted
+                                playsInline
+                              />
+                            ) : (
+                              <img
+                                src={postMediaPreview}
+                                alt="Post Preview"
+                                className="max-h-36 max-w-full rounded object-contain"
+                                referrerPolicy="no-referrer"
+                              />
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                  setPostMediaFile(null);
+                                  setPostMediaUrl("");
+                                  setPostMediaType(undefined);
+                                  setPostMediaPreview("");
+                                  triggerAlert("Post media attachment removed", "info");
+                              }}
+                              className="absolute top-1 right-1 p-1 bg-rose-600 hover:bg-rose-700 text-white rounded-full shadow-md transition-colors cursor-pointer"
+                              title="Remove post media"
+                            >
+                              <X className="w-3 h-3" />
+                            </button>
+                            <span className="absolute bottom-1 left-1 px-1.5 py-0.5 rounded bg-black/60 text-white font-mono text-[8px] uppercase">
+                              {postMediaType} attachment
+                            </span>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Post Scope & Expiration */}
+                      <div className="grid grid-cols-2 gap-3 mt-1">
+                        <div className="flex flex-col gap-1">
+                          <label className="text-[10px] font-bold text-[#64748B] uppercase tracking-wider">Post Visibility</label>
+                          <div className="flex gap-1 mt-1">
+                            <button
+                              type="button"
+                              onClick={() => setNewPostType("public")}
+                              className={`flex-1 py-1.5 px-2 rounded-lg text-[9px] font-bold flex items-center justify-center gap-1 border transition-all cursor-pointer ${
+                                newPostType === "public"
+                                  ? "bg-blue-600 border-blue-600 text-white shadow-sm"
+                                  : "bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100"
+                              }`}
+                            >
+                              <Globe className="w-2.5 h-2.5" />
+                              Global
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setNewPostType("nearby_public")}
+                              className={`flex-1 py-1.5 px-2 rounded-lg text-[9px] font-bold flex items-center justify-center gap-1 border transition-all cursor-pointer ${
+                                newPostType === "nearby_public"
+                                  ? "bg-indigo-600 border-indigo-600 text-white shadow-sm"
+                                  : "bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100"
+                              }`}
+                            >
+                              <Map className="w-2.5 h-2.5" />
+                              Nearby
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="flex flex-col gap-1">
+                          <label className="text-[10px] font-bold text-[#64748B] uppercase tracking-wider">Auto-Expire Post</label>
+                          <select
+                            value={newPostExpiration}
+                            onChange={(e) => setNewPostExpiration(Number(e.target.value))}
+                            className="bg-[#F8FAFC] border border-[#E2E8F0] rounded-lg px-2 py-1.5 text-[11px] font-semibold text-[#1E293B] focus:outline-none focus:border-blue-500 w-full mt-1 h-[30px]"
+                          >
+                            <option value={0}>Never Expire</option>
+                            <option value={12}>12 Hours</option>
+                            <option value={24}>24 Hours</option>
+                            <option value={72}>3 Days</option>
+                            <option value={168}>7 Days</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      <div className="mt-1 bg-slate-50 border border-slate-100 rounded-lg p-2 text-[9px] text-slate-500 leading-normal font-medium">
+                        {newPostType === "public" ? (
+                          <p className="flex items-start gap-1">
+                            <Globe className="w-3 h-3 text-blue-500 shrink-0 mt-0.5" />
+                            <span><strong>Global Post:</strong> Visible on the Global Posts Timeline to everyone. Will {newPostExpiration > 0 ? `expire in ${newPostExpiration} hours.` : "never expire."}</span>
+                          </p>
+                        ) : (
+                          <p className="flex items-start gap-1">
+                            <Map className="w-3 h-3 text-indigo-500 shrink-0 mt-0.5" />
+                            <span><strong>Nearby Post:</strong> Broadcasted only to users within {searchRadius} km. Will {newPostExpiration > 0 ? `expire in ${newPostExpiration} hours.` : "never expire."}</span>
+                          </p>
+                        )}
+                      </div>
+
+                      <button
+                        type="submit"
+                        disabled={isSubmittingPost || !newPostContent.trim()}
+                        className="w-full py-2 px-3 rounded-lg bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-bold text-[10px] uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                        id="btn-publish-post-submit"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        Publish Post
+                      </button>
+                    </form>
+                  </div>
+                </div>
+
                 {/* 1C. Share Section Friends List (Visible on Share Tab on mobile) */}
                 {mobileDemoTab === "share" && (
                   <div className="bg-white rounded-xl border border-[#E2E8F0] overflow-hidden flex flex-col shadow-sm md:hidden" id="share-section-friends">
@@ -2933,7 +3146,7 @@ export default function App() {
                         ) : (
                           <>
                             <Globe className="w-3.5 h-3.5 text-blue-600 animate-pulse" />
-                            Public Posts Feed (X/Twitter-style)
+                            Public Stories Feed (Instagram-style)
                           </>
                         )}
                       </span>
