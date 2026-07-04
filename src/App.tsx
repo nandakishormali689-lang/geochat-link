@@ -5,7 +5,7 @@ import {
   Send, Shield, CheckCircle, Copy, Check, Users, MessageCircle, AlertCircle, 
   Volume2, Video, PhoneOff, MicOff, Mic, Smile, Paperclip, Trash2, Languages,
   ChevronRight, Sparkles, Play, Square, Info, RefreshCw, X, Palette, Clock, Film, Plus,
-  Star, ChevronLeft, Pause
+  Star, ChevronLeft, Pause, LogOut
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { StackFeature, ChatMessage, NearbyUser, CallState, Story } from "./types";
@@ -1736,38 +1736,31 @@ export default function App() {
       </AnimatePresence>
 
       {/* Elegant Header */}
-      <header className={`bg-[#0F172A] border-b border-slate-800 sticky top-0 z-40 px-4 md:px-6 transition-all duration-300 ease-in-out ${isScrolled && !isForceExpanded ? "py-2.5 shadow-md shadow-slate-950/25" : "py-4"}`}>
-        <div className="max-w-7xl mx-auto flex flex-row items-center justify-between gap-2">
+      <header className="bg-[#0F172A] border-b border-slate-800 sticky top-0 z-40 px-3 sm:px-4 md:px-6 py-2.5 shadow-md shadow-slate-950/25">
+        <div className="max-w-7xl mx-auto flex flex-row items-center justify-between gap-1.5 sm:gap-2">
           <div 
-            onClick={() => setIsForceExpanded(prev => !prev)}
-            className="flex items-center gap-2.5 cursor-pointer select-none group active:scale-95 transition-transform"
-            title={isForceExpanded ? "Click to lock collapsed" : "Click to expand header"}
+            className="flex items-center gap-2 select-none"
           >
-            <div className={`rounded-xl bg-slate-900 flex items-center justify-center text-white shadow-sm border border-slate-700 group-hover:border-emerald-500/50 transition-all duration-300 ${isScrolled && !isForceExpanded ? "w-8 h-8" : "w-10 h-10"}`}>
-              <Compass className={`text-emerald-400 group-hover:rotate-12 transition-transform duration-300 ${isScrolled && !isForceExpanded ? "w-4 h-4" : "w-5 h-5"}`} />
+            <div className="rounded-xl bg-slate-900 flex items-center justify-center text-white shadow-sm border border-slate-700 w-8 h-8 shrink-0">
+              <Compass className="text-emerald-400 w-4 h-4" />
             </div>
             <div>
-              <h1 className={`font-black tracking-tight text-white flex items-center gap-1.5 transition-all duration-300 ${isScrolled && !isForceExpanded ? "text-base" : "text-xl"}`}>
+              <h1 className="font-black tracking-tight text-white flex items-center gap-1 text-sm sm:text-base">
                 Geochat Link
-                {isScrolled && (
-                  <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded transition-all ${isForceExpanded ? 'bg-emerald-500/10 text-emerald-400' : 'bg-slate-800 text-slate-400'}`}>
-                    {isForceExpanded ? "Expanded" : "Tap logo"}
-                  </span>
-                )}
               </h1>
             </div>
           </div>
 
           {authUser && (
-            <div className="flex items-center gap-2 md:gap-3 relative shrink-0">
+            <div className="flex items-center gap-1.5 sm:gap-2 md:gap-3 relative shrink-0">
               {/* Bell Icon & Notification Dropdown */}
               <div className="relative">
                 <button
                   id="btn-bell-notifications"
                   onClick={() => setShowRequestsDropdown(prev => !prev)}
-                  className={`bg-slate-900/80 hover:bg-slate-800/90 border border-slate-800 hover:border-slate-700 text-slate-300 hover:text-white rounded-xl transition-all relative cursor-pointer flex items-center justify-center shadow-sm ${isScrolled && !isForceExpanded ? "p-2" : "p-2.5"}`}
+                  className="bg-slate-900/80 hover:bg-slate-800/90 border border-slate-800 hover:border-slate-700 text-slate-300 hover:text-white rounded-xl transition-all relative cursor-pointer flex items-center justify-center shadow-sm p-2 shrink-0"
                 >
-                  <Bell className={`${isScrolled && !isForceExpanded ? "w-3.5 h-3.5" : "w-4 h-4"}`} />
+                  <Bell className="w-3.5 h-3.5" />
                   {receivedRequests.length > 0 && (
                     <span className="absolute -top-1.5 -right-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-rose-500 text-[9px] font-bold text-white ring-2 ring-[#0F172A] animate-bounce">
                       {receivedRequests.length}
@@ -1845,18 +1838,15 @@ export default function App() {
                 </AnimatePresence>
               </div>
 
-              <div className={`flex items-center gap-2 bg-slate-900/80 border border-slate-800 rounded-xl transition-all ${isScrolled && !isForceExpanded ? "px-2 py-1" : "px-3.5 py-1.5"}`}>
+              <div className="flex items-center gap-1.5 sm:gap-2 bg-slate-900/80 border border-slate-800 rounded-xl px-2 py-1 transition-all shrink-0">
                 <img 
                   src={avatarUrl} 
                   alt="My Profile avatar" 
-                  className={`rounded bg-slate-950 object-contain transition-all ${isScrolled && !isForceExpanded ? "w-6 h-6" : "w-7 h-7"}`}
+                  className="rounded bg-slate-950 object-contain w-6 h-6 shrink-0"
                   referrerPolicy="no-referrer"
                 />
-                <div className={isScrolled && !isForceExpanded ? "hidden sm:block" : "block"}>
-                  {!(isScrolled && !isForceExpanded) && (
-                    <span className="text-[9px] font-bold text-slate-400 block uppercase tracking-wider leading-none">Logged In As</span>
-                  )}
-                  <span className={`font-black text-slate-100 block leading-none ${isScrolled && !isForceExpanded ? "text-xs" : "text-xs mt-1"}`}>
+                <div className="hidden sm:block">
+                  <span className="font-black text-slate-100 block leading-none text-xs truncate max-w-[80px]">
                     {myProfile.name}
                   </span>
                 </div>
@@ -1866,10 +1856,11 @@ export default function App() {
                       triggerAlert("Signed out successfully from Geochat workspace.", "info");
                     });
                   }}
-                  className={`bg-rose-500/20 hover:bg-rose-500/30 border border-rose-500/30 text-rose-400 hover:text-rose-300 transition-all font-bold text-[9px] uppercase tracking-wider rounded cursor-pointer ${isScrolled && !isForceExpanded ? "px-2 py-1 text-[8px]" : "px-2.5 py-1.5 ml-2"}`}
+                  className="bg-rose-500/20 hover:bg-rose-500/30 border border-rose-500/30 text-rose-400 hover:text-rose-300 transition-all font-bold text-[9px] uppercase tracking-wider rounded cursor-pointer px-2 py-1 flex items-center gap-1 shrink-0"
                   title="Log Out"
                 >
-                  Log Out
+                  <LogOut className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Log Out</span>
                 </button>
               </div>
             </div>
@@ -3773,307 +3764,307 @@ export default function App() {
                   )}
                 </AnimatePresence>
 
-                {/* Create Community Modal */}
-                <AnimatePresence>
-                  {showCreateCommunity && (
-                    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
-                      <motion.div
-                        initial={{ opacity: 0, scale: 0.95, y: 15 }}
-                        animate={{ opacity: 1, scale: 1, y: 0 }}
-                        exit={{ opacity: 0, scale: 0.95, y: 15 }}
-                        transition={{ duration: 0.2, ease: "easeOut" }}
-                        className="w-full max-w-md bg-white rounded-2xl border border-slate-200 shadow-xl overflow-hidden"
-                      >
-                        <div className="bg-[#F1F5F9] px-5 py-4 border-b border-slate-200 flex items-center justify-between">
-                          <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-800 flex items-center gap-2">
-                            🗺️ Create Local Community
-                          </h3>
+              </div>
+
+              {/* Create Community Modal */}
+              <AnimatePresence>
+                {showCreateCommunity && (
+                  <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+                    <motion.div
+                      initial={{ opacity: 0, scale: 0.95, y: 15 }}
+                      animate={{ opacity: 1, scale: 1, y: 0 }}
+                      exit={{ opacity: 0, scale: 0.95, y: 15 }}
+                      transition={{ duration: 0.2, ease: "easeOut" }}
+                      className="w-full max-w-md bg-white rounded-2xl border border-slate-200 shadow-xl overflow-hidden"
+                    >
+                      <div className="bg-[#F1F5F9] px-5 py-4 border-b border-slate-200 flex items-center justify-between">
+                        <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-800 flex items-center gap-2">
+                          🗺️ Create Local Community
+                        </h3>
+                        <button
+                          onClick={() => setShowCreateCommunity(false)}
+                          className="p-1.5 rounded-lg hover:bg-slate-200 text-slate-500 transition-colors cursor-pointer"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      </div>
+
+                      <form onSubmit={handleCreateCommunity} className="p-5 flex flex-col gap-4">
+                        <div className="text-[11px] text-slate-500 leading-relaxed bg-blue-50 text-blue-700 border border-blue-100 rounded-lg p-3">
+                          📍 <strong>Geotagging Active:</strong> Your community will be created at your current coordinates (<strong>{myProfile.latitude?.toFixed(4)}, {myProfile.longitude?.toFixed(4)}</strong>), allowing nearby users to discover it.
+                        </div>
+
+                        <div>
+                          <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-600 mb-1.5">
+                            Community Name
+                          </label>
+                          <input
+                            type="text"
+                            required
+                            maxLength={40}
+                            placeholder="e.g. Downtown Coffee & Code"
+                            value={newCommName}
+                            onChange={(e) => setNewCommName(e.target.value)}
+                            className="w-full text-xs px-3.5 py-2.5 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 bg-white font-medium"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-600 mb-1.5">
+                            Primary Interest Category
+                          </label>
+                          <select
+                            value={newCommCategory}
+                            onChange={(e) => setNewCommCategory(e.target.value)}
+                            className="w-full text-xs px-3.5 py-2.5 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 bg-white font-bold text-slate-700"
+                          >
+                            {INTERESTS_LIST.map((int) => (
+                              <option key={int.id} value={int.id}>
+                                {int.name}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-600 mb-1.5">
+                            Description (Max 140 chars)
+                          </label>
+                          <textarea
+                            maxLength={140}
+                            placeholder="What is this community about? Weekly meetups? Discussions?"
+                            value={newCommDescription}
+                            onChange={(e) => setNewCommDescription(e.target.value)}
+                            className="w-full text-xs px-3.5 py-2.5 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 bg-white min-h-[80px] resize-none font-medium"
+                          />
+                        </div>
+
+                        <div className="flex justify-end gap-2.5 pt-2 border-t border-slate-100 mt-2">
                           <button
+                            type="button"
                             onClick={() => setShowCreateCommunity(false)}
-                            className="p-1.5 rounded-lg hover:bg-slate-200 text-slate-500 transition-colors cursor-pointer"
+                            className="text-[11px] font-bold uppercase tracking-wider px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg transition-all"
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            type="submit"
+                            className="text-[11px] font-bold uppercase tracking-wider px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-all shadow-sm shadow-indigo-600/10 flex items-center gap-1.5 cursor-pointer"
+                          >
+                            <Plus className="w-3.5 h-3.5" /> Create & Join
+                          </button>
+                        </div>
+                      </form>
+                    </motion.div>
+                  </div>
+                )}
+              </AnimatePresence>
+
+              {/* STORIES SLIDESHOW MODAL */}
+              <AnimatePresence>
+                {activeStoryGroup && (
+                  <motion.div
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    className="fixed inset-0 bg-slate-950/90 z-[999] flex items-center justify-center p-4 backdrop-blur-md"
+                    id="story-modal-overlay"
+                    onClick={() => setActiveStoryGroup(null)}
+                  >
+                    <motion.div
+                      initial={{ scale: 0.9, y: 20 }}
+                      animate={{ scale: 1, y: 0 }}
+                      exit={{ scale: 0.9, y: 20 }}
+                      transition={{ type: "spring", damping: 25, stiffness: 350 }}
+                      className="w-full max-w-sm bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-2xl relative flex flex-col h-[520px]"
+                      id="story-modal-content"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      {/* Progress bar indicator */}
+                      <div className="absolute top-3 left-4 right-4 flex gap-1 z-20">
+                        {activeStoryGroup.stories.map((s, index) => {
+                          const isPast = index < currentStoryIndex;
+                          const isActive = index === currentStoryIndex;
+                          return (
+                            <div key={s.id} className="h-1 flex-1 bg-slate-800 rounded-full overflow-hidden">
+                              <div 
+                                className={`h-full rounded-full transition-all duration-300 ${
+                                  isPast 
+                                    ? "w-full bg-pink-500" 
+                                    : isActive 
+                                      ? "w-full bg-pink-500 animate-pulse" 
+                                      : "w-0 bg-slate-850"
+                                }`} 
+                              />
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      {/* Author Info */}
+                      <div className="p-4 pt-6 flex items-center justify-between border-b border-slate-800 bg-slate-950/60 relative z-10">
+                        <div className="flex items-center gap-3">
+                          <img 
+                            src={activeStoryGroup.avatar} 
+                            alt={activeStoryGroup.userName} 
+                            className="w-10 h-10 rounded-full border border-slate-700 object-contain bg-slate-800"
+                            referrerPolicy="no-referrer"
+                          />
+                          <div>
+                            <h4 className="text-xs font-bold text-white flex items-center gap-1.5">
+                              {activeStoryGroup.userName}
+                              {activeStoryGroup.stories[currentStoryIndex]?.userId === myProfile.id && (
+                                <span className="text-[8px] bg-slate-800 text-slate-300 px-1.5 py-0.5 rounded font-mono">You</span>
+                              )}
+                            </h4>
+                            <p className="text-[9px] text-slate-400 font-medium">
+                              Story {currentStoryIndex + 1} of {activeStoryGroup.stories.length}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-1.5">
+                          {/* Play/Pause control to stop/start the slideshow */}
+                          <button
+                            onClick={() => {
+                              setIsStoryPaused(!isStoryPaused);
+                              triggerAlert(isStoryPaused ? "Story slideshow resumed" : "Story slideshow paused", "info");
+                            }}
+                            className={`p-1.5 rounded-full hover:bg-slate-800 transition-all cursor-pointer ${
+                              isStoryPaused ? "text-emerald-400 hover:text-emerald-355" : "text-slate-400 hover:text-white"
+                            }`}
+                            title={isStoryPaused ? "Resume slideshow" : "Pause / Stop slideshow"}
+                          >
+                            {isStoryPaused ? <Play className="w-4 h-4 fill-emerald-400 text-emerald-400" /> : <Pause className="w-4 h-4" />}
+                          </button>
+
+                          <button 
+                            onClick={() => setActiveStoryGroup(null)}
+                            className="p-1.5 rounded-full hover:bg-slate-800 text-slate-400 hover:text-white transition-all cursor-pointer"
+                            id="btn-close-story-modal"
                           >
                             <X className="w-4 h-4" />
                           </button>
                         </div>
+                      </div>
 
-                        <form onSubmit={handleCreateCommunity} className="p-5 flex flex-col gap-4">
-                          <div className="text-[11px] text-slate-500 leading-relaxed bg-blue-50 text-blue-700 border border-blue-100 rounded-lg p-3">
-                            📍 <strong>Geotagging Active:</strong> Your community will be created at your current coordinates (<strong>{myProfile.latitude?.toFixed(4)}, {myProfile.longitude?.toFixed(4)}</strong>), allowing nearby users to discover it.
-                          </div>
-
-                          <div>
-                            <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-600 mb-1.5">
-                              Community Name
-                            </label>
-                            <input
-                              type="text"
-                              required
-                              maxLength={40}
-                              placeholder="e.g. Downtown Coffee & Code"
-                              value={newCommName}
-                              onChange={(e) => setNewCommName(e.target.value)}
-                              className="w-full text-xs px-3.5 py-2.5 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 bg-white font-medium"
-                            />
-                          </div>
-
-                          <div>
-                            <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-600 mb-1.5">
-                              Primary Interest Category
-                            </label>
-                            <select
-                              value={newCommCategory}
-                              onChange={(e) => setNewCommCategory(e.target.value)}
-                              className="w-full text-xs px-3.5 py-2.5 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 bg-white font-bold text-slate-700"
-                            >
-                              {INTERESTS_LIST.map((int) => (
-                                <option key={int.id} value={int.id}>
-                                  {int.name}
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-
-                          <div>
-                            <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-600 mb-1.5">
-                              Description (Max 140 chars)
-                            </label>
-                            <textarea
-                              maxLength={140}
-                              placeholder="What is this community about? Weekly meetups? Discussions?"
-                              value={newCommDescription}
-                              onChange={(e) => setNewCommDescription(e.target.value)}
-                              className="w-full text-xs px-3.5 py-2.5 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 bg-white min-h-[80px] resize-none font-medium"
-                            />
-                          </div>
-
-                          <div className="flex justify-end gap-2.5 pt-2 border-t border-slate-100 mt-2">
-                            <button
-                              type="button"
-                              onClick={() => setShowCreateCommunity(false)}
-                              className="text-[11px] font-bold uppercase tracking-wider px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg transition-all"
-                            >
-                              Cancel
-                            </button>
-                            <button
-                              type="submit"
-                              className="text-[11px] font-bold uppercase tracking-wider px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-all shadow-sm shadow-indigo-600/10 flex items-center gap-1.5 cursor-pointer"
-                            >
-                              <Plus className="w-3.5 h-3.5" /> Create & Join
-                            </button>
-                          </div>
-                        </form>
-                      </motion.div>
-                    </div>
-                  )}
-                </AnimatePresence>
-
-                {/* STORIES SLIDESHOW MODAL */}
-                <AnimatePresence>
-                  {activeStoryGroup && (
-                    <motion.div
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      exit={{ opacity: 0 }}
-                      className="fixed inset-0 bg-slate-950/90 z-[999] flex items-center justify-center p-4 backdrop-blur-md"
-                      id="story-modal-overlay"
-                      onClick={() => setActiveStoryGroup(null)}
-                    >
-                      <motion.div
-                        initial={{ scale: 0.9, y: 20 }}
-                        animate={{ scale: 1, y: 0 }}
-                        exit={{ scale: 0.9, y: 20 }}
-                        transition={{ type: "spring", damping: 25, stiffness: 350 }}
-                        className="w-full max-w-sm bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-2xl relative flex flex-col h-[520px]"
-                        id="story-modal-content"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        {/* Progress bar indicator */}
-                        <div className="absolute top-3 left-4 right-4 flex gap-1 z-20">
-                          {activeStoryGroup.stories.map((s, index) => {
-                            const isPast = index < currentStoryIndex;
-                            const isActive = index === currentStoryIndex;
-                            return (
-                              <div key={s.id} className="h-1 flex-1 bg-slate-800 rounded-full overflow-hidden">
-                                <div 
-                                  className={`h-full rounded-full transition-all duration-300 ${
-                                    isPast 
-                                      ? "w-full bg-pink-500" 
-                                      : isActive 
-                                        ? "w-full bg-pink-500 animate-pulse" 
-                                        : "w-0 bg-slate-850"
-                                  }`} 
-                                />
-                              </div>
-                            );
-                          })}
-                        </div>
-
-                        {/* Author Info */}
-                        <div className="p-4 pt-6 flex items-center justify-between border-b border-slate-800 bg-slate-950/60 relative z-10">
-                          <div className="flex items-center gap-3">
-                            <img 
-                              src={activeStoryGroup.avatar} 
-                              alt={activeStoryGroup.userName} 
-                              className="w-10 h-10 rounded-full border border-slate-700 object-contain bg-slate-800"
-                              referrerPolicy="no-referrer"
-                            />
-                            <div>
-                              <h4 className="text-xs font-bold text-white flex items-center gap-1.5">
-                                {activeStoryGroup.userName}
-                                {activeStoryGroup.stories[currentStoryIndex]?.userId === myProfile.id && (
-                                  <span className="text-[8px] bg-slate-800 text-slate-300 px-1.5 py-0.5 rounded font-mono">You</span>
-                                )}
-                              </h4>
-                              <p className="text-[9px] text-slate-400 font-medium">
-                                Story {currentStoryIndex + 1} of {activeStoryGroup.stories.length}
-                              </p>
-                            </div>
-                          </div>
-
-                          <div className="flex items-center gap-1.5">
-                            {/* Play/Pause control to stop/start the slideshow */}
-                            <button
-                              onClick={() => {
-                                setIsStoryPaused(!isStoryPaused);
-                                triggerAlert(isStoryPaused ? "Story slideshow resumed" : "Story slideshow paused", "info");
-                              }}
-                              className={`p-1.5 rounded-full hover:bg-slate-800 transition-all cursor-pointer ${
-                                isStoryPaused ? "text-emerald-400 hover:text-emerald-355" : "text-slate-400 hover:text-white"
-                              }`}
-                              title={isStoryPaused ? "Resume slideshow" : "Pause / Stop slideshow"}
-                            >
-                              {isStoryPaused ? <Play className="w-4 h-4 fill-emerald-400 text-emerald-400" /> : <Pause className="w-4 h-4" />}
-                            </button>
-
-                            <button 
-                              onClick={() => setActiveStoryGroup(null)}
-                              className="p-1.5 rounded-full hover:bg-slate-800 text-slate-400 hover:text-white transition-all cursor-pointer"
-                              id="btn-close-story-modal"
-                            >
-                              <X className="w-4 h-4" />
-                            </button>
-                          </div>
-                        </div>
-
-                        {/* Stories Content Slideshow List */}
-                        <div className="flex-1 overflow-hidden p-4 flex flex-col justify-center bg-gradient-to-b from-slate-900 via-slate-950 to-slate-900 relative">
-                          
-                          {/* Navigation Buttons */}
-                          <div className="absolute inset-x-2 top-1/2 -translate-y-1/2 flex justify-between z-20 pointer-events-none">
-                            <button
-                              onClick={() => {
-                                setCurrentStoryIndex(prev => Math.max(0, prev - 1));
+                      {/* Stories Content Slideshow List */}
+                      <div className="flex-1 overflow-hidden p-4 flex flex-col justify-center bg-gradient-to-b from-slate-900 via-slate-950 to-slate-900 relative">
+                        
+                        {/* Navigation Buttons */}
+                        <div className="absolute inset-x-2 top-1/2 -translate-y-1/2 flex justify-between z-20 pointer-events-none">
+                          <button
+                            onClick={() => {
+                              setCurrentStoryIndex(prev => Math.max(0, prev - 1));
+                              setIsStoryPaused(true); // Pause auto-play on manual interaction
+                            }}
+                            disabled={currentStoryIndex === 0}
+                            className={`p-1.5 rounded-full bg-slate-950/70 border border-slate-800 text-white hover:bg-slate-900 transition-all pointer-events-auto cursor-pointer disabled:opacity-0 disabled:cursor-not-allowed`}
+                            title="Previous Story"
+                          >
+                            <ChevronLeft className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => {
+                              if (currentStoryIndex + 1 < activeStoryGroup.stories.length) {
+                                setCurrentStoryIndex(prev => prev + 1);
                                 setIsStoryPaused(true); // Pause auto-play on manual interaction
-                              }}
-                              disabled={currentStoryIndex === 0}
-                              className={`p-1.5 rounded-full bg-slate-950/70 border border-slate-800 text-white hover:bg-slate-900 transition-all pointer-events-auto cursor-pointer disabled:opacity-0 disabled:cursor-not-allowed`}
-                              title="Previous Story"
-                            >
-                              <ChevronLeft className="w-4 h-4" />
-                            </button>
-                            <button
-                              onClick={() => {
-                                if (currentStoryIndex + 1 < activeStoryGroup.stories.length) {
-                                  setCurrentStoryIndex(prev => prev + 1);
-                                  setIsStoryPaused(true); // Pause auto-play on manual interaction
-                                } else {
-                                  setActiveStoryGroup(null);
-                                }
-                              }}
-                              className="p-1.5 rounded-full bg-slate-950/70 border border-slate-800 text-white hover:bg-slate-900 transition-all pointer-events-auto cursor-pointer"
-                              title="Next Story"
-                            >
-                              <ChevronRight className="w-4 h-4" />
-                            </button>
-                          </div>
+                              } else {
+                                setActiveStoryGroup(null);
+                              }
+                            }}
+                            className="p-1.5 rounded-full bg-slate-950/70 border border-slate-800 text-white hover:bg-slate-900 transition-all pointer-events-auto cursor-pointer"
+                            title="Next Story"
+                          >
+                            <ChevronRight className="w-4 h-4" />
+                          </button>
+                        </div>
 
-                          <div className="flex flex-col gap-3 text-center items-center h-full justify-center">
-                            {(() => {
-                              const story = activeStoryGroup.stories[currentStoryIndex];
-                              if (!story) return null;
-                              return (
-                                <div key={story.id} className="w-full flex flex-col items-center gap-3">
-                                  {/* Story Privacy Indicator */}
-                                  <div className="flex items-center gap-1.5 justify-between w-full px-2">
-                                    <div className="flex items-center gap-1">
-                                      {story.type === "close_friends" ? (
-                                        <span className="text-[9px] font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-0.5 rounded-full flex items-center gap-1">
-                                          <Star className="w-2.5 h-2.5 fill-emerald-400 text-emerald-400" />
-                                          Close Friends
-                                        </span>
-                                      ) : story.type === "friends" || (story.type as string) === "private" ? (
-                                        <span className="text-[9px] font-bold text-amber-400 bg-amber-500/10 border border-amber-500/20 px-2.5 py-0.5 rounded-full flex items-center gap-1">
-                                          <Users className="w-2.5 h-2.5" />
-                                          Friends Only
-                                        </span>
-                                      ) : (
-                                        <span className="text-[9px] font-bold text-blue-400 bg-blue-400/10 border border-blue-400/20 px-2.5 py-0.5 rounded-full flex items-center gap-1">
-                                          <Globe className="w-2.5 h-2.5" />
-                                          Public Scope
-                                        </span>
-                                      )}
-                                      <span className="text-[9px] text-slate-500 font-medium font-mono">
-                                        • {new Date(story.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        <div className="flex flex-col gap-3 text-center items-center h-full justify-center">
+                          {(() => {
+                            const story = activeStoryGroup.stories[currentStoryIndex];
+                            if (!story) return null;
+                            return (
+                              <div key={story.id} className="w-full flex flex-col items-center gap-3">
+                                {/* Story Privacy Indicator */}
+                                <div className="flex items-center gap-1.5 justify-between w-full px-2">
+                                  <div className="flex items-center gap-1">
+                                    {story.type === "close_friends" ? (
+                                      <span className="text-[9px] font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-0.5 rounded-full flex items-center gap-1">
+                                        <Star className="w-2.5 h-2.5 fill-emerald-400 text-emerald-400" />
+                                        Close Friends
                                       </span>
-                                    </div>
-                                    
-                                    {/* Delete Button (Visible only to the story author) */}
-                                    {story.userId === myProfile.id && (
-                                      <button
-                                        onClick={() => handleDeleteStory(story.id)}
-                                        className="text-[9px] font-bold text-rose-400 hover:text-rose-300 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/20 px-2 py-0.5 rounded-full transition-all flex items-center gap-1 cursor-pointer"
-                                        title="Delete your story"
-                                      >
-                                        <Trash2 className="w-2.5 h-2.5" />
-                                        Delete
-                                      </button>
+                                    ) : story.type === "friends" || (story.type as string) === "private" ? (
+                                      <span className="text-[9px] font-bold text-amber-400 bg-amber-500/10 border border-amber-500/20 px-2.5 py-0.5 rounded-full flex items-center gap-1">
+                                        <Users className="w-2.5 h-2.5" />
+                                        Friends Only
+                                      </span>
+                                    ) : (
+                                      <span className="text-[9px] font-bold text-blue-400 bg-blue-400/10 border border-blue-400/20 px-2.5 py-0.5 rounded-full flex items-center gap-1">
+                                        <Globe className="w-2.5 h-2.5" />
+                                        Public Scope
+                                      </span>
                                     )}
+                                    <span className="text-[9px] text-slate-500 font-medium font-mono">
+                                      • {new Date(story.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                    </span>
                                   </div>
-
-                                  {/* Story Content Text */}
-                                  <p className="text-sm font-bold text-white leading-relaxed text-center w-full bg-slate-950/40 p-4 rounded-xl border border-slate-800/80 shadow-md">
-                                    "{story.content}"
-                                  </p>
-
-                                  {/* Media Attachment in Slideshow */}
-                                  {story.mediaUrl && (
-                                    <div className="w-full rounded-xl overflow-hidden border border-slate-800/85 bg-black/60 mt-1.5 shadow-lg flex items-center justify-center h-48">
-                                      {story.mediaType === "video" ? (
-                                        <video
-                                          src={story.mediaUrl}
-                                          className="w-full h-full object-contain mx-auto"
-                                          controls
-                                          autoPlay
-                                          muted
-                                          loop
-                                          playsInline
-                                        />
-                                      ) : (
-                                        <img
-                                          src={story.mediaUrl}
-                                          alt="Story attachment"
-                                          className="w-full h-full object-contain mx-auto"
-                                          referrerPolicy="no-referrer"
-                                        />
-                                      )}
-                                    </div>
+                                  
+                                  {/* Delete Button (Visible only to the story author) */}
+                                  {story.userId === myProfile.id && (
+                                    <button
+                                      onClick={() => handleDeleteStory(story.id)}
+                                      className="text-[9px] font-bold text-rose-400 hover:text-rose-300 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/20 px-2 py-0.5 rounded-full transition-all flex items-center gap-1 cursor-pointer"
+                                      title="Delete your story"
+                                    >
+                                      <Trash2 className="w-2.5 h-2.5" />
+                                      Delete
+                                    </button>
                                   )}
                                 </div>
-                              );
-                            })()}
-                          </div>
-                        </div>
 
-                        {/* Footer close help */}
-                        <div className="p-3 text-center border-t border-slate-800 text-[10px] text-slate-500 font-medium bg-slate-950/40">
-                          Click outside to close slideshow
+                                {/* Story Content Text */}
+                                <p className="text-sm font-bold text-white leading-relaxed text-center w-full bg-slate-950/40 p-4 rounded-xl border border-slate-800/80 shadow-md">
+                                  "{story.content}"
+                                </p>
+
+                                {/* Media Attachment in Slideshow */}
+                                {story.mediaUrl && (
+                                  <div className="w-full rounded-xl overflow-hidden border border-slate-800/85 bg-black/60 mt-1.5 shadow-lg flex items-center justify-center h-48">
+                                    {story.mediaType === "video" ? (
+                                      <video
+                                        src={story.mediaUrl}
+                                        className="w-full h-full object-contain mx-auto"
+                                        controls
+                                        autoPlay
+                                        muted
+                                        loop
+                                        playsInline
+                                      />
+                                    ) : (
+                                      <img
+                                        src={story.mediaUrl}
+                                        alt="Story attachment"
+                                        className="w-full h-full object-contain mx-auto"
+                                        referrerPolicy="no-referrer"
+                                      />
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })()}
                         </div>
-                      </motion.div>
+                      </div>
+
+                      {/* Footer close help */}
+                      <div className="p-3 text-center border-t border-slate-800 text-[10px] text-slate-500 font-medium bg-slate-950/40">
+                        Click outside to close slideshow
+                      </div>
                     </motion.div>
-                  )}
-                </AnimatePresence>
-
-              </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
 
             </motion.div>
           )}
@@ -4193,7 +4184,7 @@ export default function App() {
       </main>
 
       {/* Footer Info credit lines */}
-      <footer className="bg-white border-t border-slate-200 px-6 py-4 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-500">
+      <footer className="bg-white border-t border-slate-200 px-6 py-4 hidden md:flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-500">
         <div>
           <span>Integrated with <strong>Google GenAI 3.5 Flash Model</strong>. Powered by server-side APIs.</span>
         </div>
