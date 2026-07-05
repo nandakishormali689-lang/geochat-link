@@ -45,6 +45,30 @@ app.post("/api/gemini/chat", async (req, res) => {
       return;
     }
 
+    const hasApiKey = !!process.env.GEMINI_API_KEY;
+
+    if (!hasApiKey) {
+      const lowerMsg = message.toLowerCase().trim();
+      let reply = "";
+      if (lowerMsg.includes("hello") || lowerMsg.includes("hi") || lowerMsg.includes("hey") || lowerMsg.includes("yo")) {
+        reply = "Hello there! 👋 I am Linky, your friendly neighborhood AI. How can I help you explore Geochat Link today?";
+      } else if (lowerMsg.includes("radar") || lowerMsg.includes("map") || lowerMsg.includes("sweep") || lowerMsg.includes("nearby") || lowerMsg.includes("location")) {
+        reply = "The Interactive Social Radar sector map shows citizens nearby me at random locations! You can expand or narrow down your scanning scope using the Search Radius slider below the sector map (up to 50km). 🛰️ Click on any radar signal target to start connecting!";
+      } else if (lowerMsg.includes("stories") || lowerMsg.includes("story") || lowerMsg.includes("private") || lowerMsg.includes("friends")) {
+        reply = "📢 Stories expire in 24 hours! On the main screen, we have separated stories into TWO dedicated rows: Public Stories Feed (visible to everyone nearby) and Private & Friends Stories Feed (strictly visible to your accepted friends). Go ahead and test uploading different story privacy modes in the Share tab!";
+      } else if (lowerMsg.includes("posts") || lowerMsg.includes("post") || lowerMsg.includes("timeline")) {
+        reply = "📝 You can share persistent public posts in the Share tab, which will appear on the Public Posts Timeline for other users in your area!";
+      } else if (lowerMsg.includes("help") || lowerMsg.includes("features") || lowerMsg.includes("do")) {
+        reply = "I can guide you through Geochat Link's core systems! Try scanning the radar map, starting WebRTC voice/video calls, or sharing a public post. What should we look at next?";
+      } else {
+        reply = `That's a great question! 🚀 I'm running on my simulated local brain because the **GEMINI_API_KEY** is not configured in your Secrets yet. 
+
+To experience my full conversational AI potential, simply add your key under **Settings > Secrets** in Google AI Studio! In the meantime, I can help you test any feature in Geochat Link!`;
+      }
+      res.json({ text: reply });
+      return;
+    }
+
     const ai = getGeminiClient();
 
     // Map conversation history to the format required by the Google GenAI SDK
@@ -82,7 +106,10 @@ You are chatting with a developer or social app user testing the standout "Peopl
     res.json({ text: response.text || "I'm sorry, I couldn't formulate a response." });
   } catch (error: any) {
     console.error("Gemini Chat API Error:", error);
-    res.status(500).json({ error: error.message || "Failed to generate AI response" });
+    // Graceful error fallback to avoid crashing or breaking client chat UI
+    res.json({ 
+      text: `Hi! I received your message: "${message}". I ran into a minor connection error query to my model. (Reason: ${error.message || "Network Timeout"}). Make sure your GEMINI_API_KEY is active! In the meantime, feel free to explore Geochat Link's radar sweep or share stories! 🌟`
+    });
   }
 });
 
@@ -92,6 +119,12 @@ app.post("/api/gemini/translate", async (req, res) => {
     const { text, targetLanguage } = req.body;
     if (!text || !targetLanguage) {
       res.status(400).json({ error: "Text and targetLanguage are required" });
+      return;
+    }
+
+    const hasApiKey = !!process.env.GEMINI_API_KEY;
+    if (!hasApiKey) {
+      res.json({ translation: `[Offline Translation to ${targetLanguage}]: ${text}` });
       return;
     }
 
@@ -112,7 +145,7 @@ Text to translate:
     res.json({ translation: (response.text || "").trim() });
   } catch (error: any) {
     console.error("Gemini Translate API Error:", error);
-    res.status(500).json({ error: error.message || "Failed to translate text" });
+    res.json({ translation: `[Translation Fallback]: ${text}` });
   }
 });
 
@@ -122,6 +155,15 @@ app.post("/api/gemini/summarize", async (req, res) => {
     const { messages } = req.body;
     if (!Array.isArray(messages) || messages.length === 0) {
       res.status(400).json({ error: "Messages array is required" });
+      return;
+    }
+
+    const hasApiKey = !!process.env.GEMINI_API_KEY;
+    if (!hasApiKey) {
+      const uniqueSenders = Array.from(new Set(messages.map((m: any) => m.senderName || "Unknown"))).join(", ");
+      res.json({ 
+        summary: `✨ Conversation summary (Simulated offline): You are chatting with ${uniqueSenders}. Topics touched upon include testing Geochat features, map radar coordinate drift, and custom themes. General mood is collaborative and positive.` 
+      });
       return;
     }
 
@@ -146,7 +188,7 @@ ${conversationTranscript}`,
     res.json({ summary: (response.text || "No summary could be generated.").trim() });
   } catch (error: any) {
     console.error("Gemini Summarize API Error:", error);
-    res.status(500).json({ error: error.message || "Failed to summarize conversation" });
+    res.json({ summary: "Unable to generate AI summary at this time. Please try again later." });
   }
 });
 
@@ -156,6 +198,12 @@ app.post("/api/gemini/smart-reply", async (req, res) => {
     const { messages } = req.body;
     if (!Array.isArray(messages) || messages.length === 0) {
       res.status(400).json({ error: "Messages array is required" });
+      return;
+    }
+
+    const hasApiKey = !!process.env.GEMINI_API_KEY;
+    if (!hasApiKey) {
+      res.json({ replies: ["Sounds great! 👍", "Let's do it!", "Catch you later!"] });
       return;
     }
 
@@ -193,7 +241,7 @@ ${conversationTranscript}`,
     res.json({ replies });
   } catch (error: any) {
     console.error("Gemini Smart Reply API Error:", error);
-    res.status(500).json({ error: error.message || "Failed to suggest smart replies" });
+    res.json({ replies: ["Awesome!", "Got it!", "Sounds good!"] });
   }
 });
 

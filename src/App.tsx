@@ -410,6 +410,10 @@ export default function App() {
 
   // File Upload
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const chatMessagesContainerRef = useRef<HTMLDivElement>(null);
+
+  // Live Radar sweeping & subtle coordinates drift state
+  const [radarTime, setRadarTime] = useState(0);
   
   // Audio Recording (Voice Message Simulation)
   const [isRecording, setIsRecording] = useState(false);
@@ -634,6 +638,33 @@ export default function App() {
     });
     return () => unsubscribe();
   }, [db, myProfile.id, authUser]);
+
+  // Live Radar sweeping & subtle coordinates drift simulation
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setRadarTime(prev => prev + 1);
+    }, 4000);
+    return () => clearInterval(timer);
+  }, []);
+
+  // Smoothly auto-scroll chat messages container to bottom on messages / chat state update
+  useEffect(() => {
+    const scrollContainer = chatMessagesContainerRef.current;
+    if (scrollContainer) {
+      const scrollDown = () => {
+        // Direct assignment ensures instant jump to prevent any layout offset issues
+        scrollContainer.scrollTop = scrollContainer.scrollHeight;
+        scrollContainer.scrollTo({
+          top: scrollContainer.scrollHeight,
+          behavior: "smooth"
+        });
+      };
+      scrollDown();
+      // Execute again slightly later to capture images or smart replies rendering
+      const t = setTimeout(scrollDown, 120);
+      return () => clearTimeout(t);
+    }
+  }, [conversations, activeChatId, aiIsResponding, isTyping]);
 
   // 3. Real-time Listener for ALL Users in Firestore
   useEffect(() => {
@@ -1435,7 +1466,15 @@ export default function App() {
     if (mobileDemoTab === "share") {
       return shareStories;
     } else {
-      return radarStories; // Show public/nearby public stories in the main stories tray!
+      // Show BOTH public stories AND private/friends stories that the user has access to!
+      // This ensures private stories are visible in the main stories tray on laptop/mobile.
+      const combined = [...radarStories];
+      shareStories.forEach(s => {
+        if (!combined.some(c => c.id === s.id)) {
+          combined.push(s);
+        }
+      });
+      return combined;
     }
   }, [mobileDemoTab, shareStories, radarStories]);
 
@@ -1479,16 +1518,23 @@ export default function App() {
     return true;
   });
 
-  // Helper to compute deterministic coordinates on circular radar plane based on ID and distance
+  // Helper to compute deterministic coordinates on circular radar plane based on ID and distance with real-time drift
   const getCoordinates = (id: string, distance: number) => {
     let sum = 0;
     for (let i = 0; i < id.length; i++) {
       sum += id.charCodeAt(i);
     }
-    const angle = (sum % 360) * (Math.PI / 180);
+    
+    // Create a gentle real-time drifting/oscillating motion for each node
+    const idSeed = sum % 100;
+    const timeFactor = (radarTime * (0.01 + (idSeed * 0.002)));
+    const angleOffset = Math.sin(timeFactor) * 0.15; // smooth angle offset
+    const radiusOffset = Math.cos(timeFactor * 1.5) * 1.5; // smooth radial offset
+    
+    const angle = ((sum % 360) * (Math.PI / 180)) + angleOffset;
     const maxRange = Math.max(searchRadius, 1);
     // Limit radius between 8% and 42% from center so dots don't overflow or overlap user avatar
-    const radius = 8 + Math.min((distance / maxRange) * 34, 34); 
+    const radius = 8 + Math.min((distance / maxRange) * 34, 34) + radiusOffset; 
     const x = 50 + radius * Math.cos(angle);
     const y = 50 + radius * Math.sin(angle);
     return { x, y };
@@ -2388,7 +2434,7 @@ export default function App() {
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -15 }}
               transition={{ duration: 0.2 }}
-              className="flex-1 p-4 lg:p-6 pb-24 lg:pb-6 grid grid-cols-1 lg:grid-cols-12 gap-6 max-w-[1600px] mx-auto w-full"
+              className="flex-1 p-4 lg:p-6 pb-24 max-w-2xl mx-auto w-full flex flex-col gap-6"
               id="app-demo-workspace"
             >
               
@@ -3146,131 +3192,177 @@ export default function App() {
               {/* Stories Tray Section */}
                 
                 {/* 2A. Instagram-like Stories Tray */}
-                <div className={`col-span-12 bg-white rounded-xl border border-[#E2E8F0] p-4 flex flex-col gap-3 shadow-sm ${(mobileDemoTab === "radar" || mobileDemoTab === "share") ? "flex" : "hidden"}`} id="stories-tray-panel">
+                <div className={`col-span-12 bg-white rounded-xl border border-[#E2E8F0] p-4 flex flex-col gap-5 shadow-sm ${(mobileDemoTab === "radar" || mobileDemoTab === "share") ? "flex" : "hidden"}`} id="stories-tray-panel">
+                  
+                  {/* Row 1: Public Stories Feed */}
                   <div className="flex flex-col gap-2.5">
                     <div className="flex items-center justify-between">
-                      <span className="text-[10px] font-bold text-[#64748B] uppercase tracking-wider flex items-center gap-1.5">
-                        {mobileDemoTab === "share" ? (
-                          <>
-                            <Lock className="w-3.5 h-3.5 text-amber-600 animate-pulse" />
-                            Private & Friends Stories Feed
-                          </>
-                        ) : (
-                          <>
-                            <Globe className="w-3.5 h-3.5 text-blue-600 animate-pulse" />
-                            Public Stories Feed (Instagram-style)
-                          </>
-                        )}
+                      <span className="text-[10.5px] font-extrabold text-[#2563EB] uppercase tracking-wider flex items-center gap-1.5">
+                        <Globe className="w-3.5 h-3.5 text-blue-600 animate-pulse" />
+                        Public Stories Feed (Instagram-style)
                       </span>
                       <span className="text-[9px] bg-pink-100 text-pink-800 font-bold px-2 py-0.5 rounded-full uppercase tracking-wider">
                         24h Expiring
                       </span>
                     </div>
 
-                    {mobileDemoTab !== "share" && (
-                      <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-lg self-start">
-                        <button
-                          type="button"
-                          onClick={() => setPublicPostsScope("nearby")}
-                          className={`px-2.5 py-1 rounded text-[9px] font-bold uppercase tracking-wider transition-all cursor-pointer ${
-                            publicPostsScope === "nearby"
-                              ? "bg-blue-600 text-white shadow-sm"
-                              : "text-slate-600 hover:text-slate-900"
-                          }`}
-                        >
-                          Nearby Posts Only
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setPublicPostsScope("global")}
-                          className={`px-2.5 py-1 rounded text-[9px] font-bold uppercase tracking-wider transition-all cursor-pointer ${
-                            publicPostsScope === "global"
-                              ? "bg-blue-600 text-white shadow-sm"
-                              : "text-slate-600 hover:text-slate-900"
-                          }`}
-                        >
-                          Global Public Posts
-                        </button>
+                    <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-lg self-start">
+                      <button
+                        type="button"
+                        onClick={() => setPublicPostsScope("nearby")}
+                        className={`px-2.5 py-1 rounded text-[9px] font-bold uppercase tracking-wider transition-all cursor-pointer ${
+                          publicPostsScope === "nearby"
+                            ? "bg-blue-600 text-white shadow-sm"
+                            : "text-[#64748B] hover:text-[#1E293B]"
+                        }`}
+                      >
+                        Nearby Only
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setPublicPostsScope("global")}
+                        className={`px-2.5 py-1 rounded text-[9px] font-bold uppercase tracking-wider transition-all cursor-pointer ${
+                          publicPostsScope === "global"
+                            ? "bg-blue-600 text-white shadow-sm"
+                            : "text-[#64748B] hover:text-[#1E293B]"
+                        }`}
+                      >
+                        Global Public
+                      </button>
+                    </div>
+
+                    {radarStories.length === 0 ? (
+                      <div className="text-center py-4 bg-slate-50 rounded-lg border border-dashed border-slate-200 text-slate-500 text-[11px] font-medium">
+                        No public stories in {publicPostsScope === "nearby" ? "your nearby area" : "the app"} yet.
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-3.5 overflow-x-auto pb-1 scrollbar-thin scrollbar-thumb-slate-200 scrollbar-track-transparent">
+                        {(() => {
+                          const groups: { [userId: string]: { userName: string; avatar: string; stories: Story[] } } = {};
+                          radarStories.forEach(s => {
+                            if (!groups[s.userId]) {
+                              groups[s.userId] = {
+                                userName: s.userName,
+                                avatar: s.avatar,
+                                stories: []
+                              };
+                            }
+                            groups[s.userId].stories.push(s);
+                          });
+
+                          return Object.entries(groups).map(([userId, group]) => {
+                            const isOwn = userId === myProfile.id;
+                            return (
+                              <button
+                                key={`public-story-${userId}`}
+                                onClick={() => {
+                                  setCurrentStoryIndex(0);
+                                  setIsStoryPaused(false);
+                                  setActiveStoryGroup(group);
+                                }}
+                                className="flex flex-col items-center gap-1 shrink-0 cursor-pointer focus:outline-none focus:ring-2 focus:ring-pink-500 focus:ring-offset-2 rounded-lg p-0.5"
+                                title={`View ${group.userName}'s public stories`}
+                              >
+                                <div className="relative">
+                                  <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-full p-[2.5px] bg-gradient-to-tr from-yellow-500 via-pink-500 to-purple-600">
+                                    <div className="w-full h-full rounded-full bg-white p-[2px]">
+                                      <img 
+                                        src={group.avatar} 
+                                        alt={group.userName} 
+                                        className="w-full h-full rounded-full object-contain bg-slate-50"
+                                        referrerPolicy="no-referrer"
+                                      />
+                                    </div>
+                                  </div>
+                                  <span className="absolute -bottom-1 -right-1 text-[8px] sm:text-[9px] px-1.5 py-0.5 rounded-full text-white font-extrabold border border-white bg-blue-600">
+                                    {group.stories.length}
+                                  </span>
+                                </div>
+                                <span className="text-[10px] font-bold text-slate-700 truncate max-w-[65px]">
+                                  {isOwn ? "Your Story" : group.userName}
+                                </span>
+                              </button>
+                            );
+                          });
+                        })()}
                       </div>
                     )}
                   </div>
 
-                  {visibleStories.length === 0 ? (
-                    <div className="text-center py-4 bg-slate-50 rounded-lg border border-dashed border-slate-200 text-slate-500 text-[11px] font-medium">
-                      {mobileDemoTab === "share" 
-                        ? "No private or friends-only stories shared yet." 
-                        : `No public posts in ${publicPostsScope === "nearby" ? "your nearby area" : "the app"} yet. Be the first to post!`}
+                  {/* Row 2: Friends & Private Stories Feed */}
+                  <div className="flex flex-col gap-2.5 border-t border-slate-100 pt-4">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10.5px] font-extrabold text-amber-700 uppercase tracking-wider flex items-center gap-1.5">
+                        <Lock className="w-3.5 h-3.5 text-amber-600 animate-pulse" />
+                        Private & Friends Stories Feed
+                      </span>
                     </div>
-                  ) : (
-                    <div className="flex items-center gap-3.5 overflow-x-auto pb-1 scrollbar-thin scrollbar-thumb-slate-200 scrollbar-track-transparent">
-                      {/* Let's group stories by userId so that clicking shows their stories */}
-                      {(() => {
-                        // Group stories by userId, keeping order
-                        const groups: { [userId: string]: { userName: string; avatar: string; stories: Story[] } } = {};
-                        visibleStories.forEach(s => {
-                          if (!groups[s.userId]) {
-                            groups[s.userId] = {
-                              userName: s.userName,
-                              avatar: s.avatar,
-                              stories: []
-                            };
-                          }
-                          groups[s.userId].stories.push(s);
-                        });
 
-                        return Object.entries(groups).map(([userId, group]) => {
-                          const hasCloseFriendsStory = group.stories.some(s => s.type === "close_friends");
-                          const hasPrivateStory = group.stories.some(s => s.type === "friends" || (s.type as string) === "private");
-                          const isOwn = userId === myProfile.id;
-                          return (
-                            <button
-                              key={userId}
-                              onClick={() => {
-                                setCurrentStoryIndex(0);
-                                setIsStoryPaused(false);
-                                setActiveStoryGroup(group);
-                              }}
-                              className="flex flex-col items-center gap-1 shrink-0 cursor-pointer focus:outline-none focus:ring-2 focus:ring-pink-500 focus:ring-offset-2 rounded-lg p-0.5"
-                              title={`View ${group.userName}'s stories`}
-                              id={`story-bubble-${userId}`}
-                            >
-                              <div className="relative">
-                                {/* Beautiful color-coded rings based on story privacy */}
-                                <div className={`w-12 h-12 sm:w-14 sm:h-14 rounded-full p-[2.5px] ${
-                                  hasCloseFriendsStory
-                                    ? "bg-gradient-to-tr from-green-400 via-emerald-500 to-teal-600"
-                                    : hasPrivateStory 
-                                      ? "bg-gradient-to-tr from-amber-500 via-orange-500 to-yellow-500" 
-                                      : "bg-gradient-to-tr from-yellow-500 via-pink-500 to-purple-600"
-                                }`}>
-                                  <div className="w-full h-full rounded-full bg-white p-[2px]">
-                                    <img 
-                                      src={group.avatar} 
-                                      alt={group.userName} 
-                                      className="w-full h-full rounded-full object-contain bg-slate-50"
-                                      referrerPolicy="no-referrer"
-                                    />
+                    {shareStories.length === 0 ? (
+                      <div className="text-center py-4 bg-slate-50 rounded-lg border border-dashed border-slate-200 text-slate-500 text-[11px] font-medium">
+                        No private or friends-only stories shared yet.
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-3.5 overflow-x-auto pb-1 scrollbar-thin scrollbar-thumb-slate-200 scrollbar-track-transparent">
+                        {(() => {
+                          const groups: { [userId: string]: { userName: string; avatar: string; stories: Story[] } } = {};
+                          shareStories.forEach(s => {
+                            if (!groups[s.userId]) {
+                              groups[s.userId] = {
+                                userName: s.userName,
+                                avatar: s.avatar,
+                                stories: []
+                              };
+                            }
+                            groups[s.userId].stories.push(s);
+                          });
+
+                          return Object.entries(groups).map(([userId, group]) => {
+                            const hasCloseFriendsStory = group.stories.some(s => s.type === "close_friends");
+                            const isOwn = userId === myProfile.id;
+                            return (
+                              <button
+                                key={`private-story-${userId}`}
+                                onClick={() => {
+                                  setCurrentStoryIndex(0);
+                                  setIsStoryPaused(false);
+                                  setActiveStoryGroup(group);
+                                }}
+                                className="flex flex-col items-center gap-1 shrink-0 cursor-pointer focus:outline-none focus:ring-2 focus:ring-pink-500 focus:ring-offset-2 rounded-lg p-0.5"
+                                title={`View ${group.userName}'s private stories`}
+                              >
+                                <div className="relative">
+                                  <div className={`w-12 h-12 sm:w-14 sm:h-14 rounded-full p-[2.5px] ${
+                                    hasCloseFriendsStory
+                                      ? "bg-gradient-to-tr from-green-400 via-emerald-500 to-teal-600"
+                                      : "bg-gradient-to-tr from-amber-500 via-orange-500 to-yellow-500"
+                                  }`}>
+                                    <div className="w-full h-full rounded-full bg-white p-[2px]">
+                                      <img 
+                                        src={group.avatar} 
+                                        alt={group.userName} 
+                                        className="w-full h-full rounded-full object-contain bg-slate-50"
+                                        referrerPolicy="no-referrer"
+                                      />
+                                    </div>
                                   </div>
+                                  <span className={`absolute -bottom-1 -right-1 text-[8px] sm:text-[9px] px-1.5 py-0.5 rounded-full text-white font-extrabold border border-white ${
+                                    hasCloseFriendsStory ? "bg-emerald-600" : "bg-amber-600"
+                                  }`}>
+                                    {group.stories.length}
+                                  </span>
                                 </div>
-                                <span className={`absolute -bottom-1 -right-1 text-[8px] sm:text-[9px] px-1.5 py-0.5 rounded-full text-white font-extrabold border border-white ${
-                                  hasCloseFriendsStory 
-                                    ? "bg-emerald-600" 
-                                    : hasPrivateStory 
-                                      ? "bg-amber-600" 
-                                      : "bg-blue-600"
-                                }`}>
-                                  {group.stories.length}
+                                <span className="text-[10px] font-bold text-slate-700 truncate max-w-[65px]">
+                                  {isOwn ? "Your Story" : group.userName}
                                 </span>
-                              </div>
-                              <span className="text-[10px] font-bold text-slate-700 truncate max-w-[65px]">
-                                {isOwn ? "Your Story" : group.userName}
-                              </span>
-                            </button>
-                          );
-                        });
-                      })()}
-                    </div>
-                  )}
+                              </button>
+                            );
+                          });
+                        })()}
+                      </div>
+                    )}
+                  </div>
+
                 </div>
 
                 {/* Brand New: Interactive Live Social Radar Sweep Map Card */}
@@ -3861,7 +3953,7 @@ export default function App() {
 
 
               {/* Right Column: Premium Interactive Messaging Window (col-span-12) */}
-              <div className={`col-span-12 max-w-5xl mx-auto w-full flex flex-col h-[760px] max-h-screen bg-white rounded-xl border border-[#E2E8F0] shadow-sm relative overflow-hidden ${mobileDemoTab === "chat" ? "flex min-h-[550px] sm:min-h-[650px]" : "hidden"}`} id="chat-window">
+              <div className={`col-span-12 max-w-5xl mx-auto w-full flex flex-col h-[calc(100vh-175px)] md:h-[550px] max-h-[75vh] bg-white rounded-xl border border-[#E2E8F0] shadow-sm relative overflow-hidden ${mobileDemoTab === "chat" ? "flex" : "hidden"}`} id="chat-window">
                 
                 {/* 1. Header of conversation (contact info + calls + actions) */}
                 <div className="bg-[#F1F5F9] border-b border-[#E2E8F0] px-4 py-3 flex items-center justify-between gap-3 relative z-10">
@@ -3978,7 +4070,7 @@ export default function App() {
                  </div>
  
                  {/* 2. Messages conversation viewport scroll pane */}
-                 <div className="flex-1 p-4 overflow-y-auto bg-[#F8FAFC] flex flex-col gap-3.5 scrollbar-thin scrollbar-thumb-slate-200 scrollbar-track-transparent relative" style={customTheme.chatWallpaper ? { backgroundImage: `url(${customTheme.chatWallpaper})`, backgroundSize: "cover", backgroundPosition: "center" } : undefined}>
+                 <div ref={chatMessagesContainerRef} className="flex-1 p-4 overflow-y-auto bg-[#F8FAFC] flex flex-col gap-3.5 scrollbar-thin scrollbar-thumb-slate-200 scrollbar-track-transparent relative" style={customTheme.chatWallpaper ? { backgroundImage: `url(${customTheme.chatWallpaper})`, backgroundSize: "cover", backgroundPosition: "center" } : undefined}>
                                        {/* Conversation Summary Overlay Modal */}
                     <AnimatePresence>
                       {activeSummary && (
