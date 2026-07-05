@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
 import { 
-  Lock, Database, MessageSquare, Server, Globe, Image, PhoneCall, 
+  Lock, Database, MessageSquare, Server, Globe, Image, PhoneCall, Phone,
   Map, Compass, Bell, User, Cpu, Code, Trophy, Camera, Music, BookOpen, 
   Send, Shield, CheckCircle, Copy, Check, Users, MessageCircle, AlertCircle, 
   Volume2, Video, PhoneOff, MicOff, Mic, Smile, Paperclip, Trash2, Languages,
   ChevronRight, Sparkles, Play, Square, Info, RefreshCw, X, Palette, Clock, Film, Plus,
-  Star, ChevronLeft, Pause, LogOut, Heart
+  Star, ChevronLeft, Pause, LogOut, Heart, Flag, Search
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { StackFeature, ChatMessage, NearbyUser, CallState, Story, Post } from "./types";
@@ -24,7 +24,8 @@ import {
   serverTimestamp,
   deleteDoc,
   getDocs,
-  updateDoc
+  updateDoc,
+  arrayUnion
 } from "firebase/firestore";
 import { 
   getAuth, 
@@ -411,6 +412,32 @@ export default function App() {
   // File Upload
   const fileInputRef = useRef<HTMLInputElement>(null);
   const chatMessagesContainerRef = useRef<HTMLDivElement>(null);
+  const postsEndRef = useRef<HTMLDivElement>(null);
+
+  // Intersection Observer for lazily loading older posts
+  useEffect(() => {
+    const observer = new IntersectionObserver((entries) => {
+      const firstEntry = entries[0];
+      if (firstEntry && firstEntry.isIntersecting) {
+        setVisiblePostsCount(prev => prev + 5);
+      }
+    }, {
+      root: null,
+      rootMargin: "100px",
+      threshold: 0.1
+    });
+
+    const target = postsEndRef.current;
+    if (target) {
+      observer.observe(target);
+    }
+
+    return () => {
+      if (target) {
+        observer.unobserve(target);
+      }
+    };
+  }, []);
 
   // Live Radar sweeping & subtle coordinates drift state
   const [radarTime, setRadarTime] = useState(0);
@@ -429,6 +456,37 @@ export default function App() {
 
   // Status Alerts
   const [alertMsg, setAlertMsg] = useState<{ text: string; type: "success" | "info" | "error" } | null>(null);
+
+  // Custom states added for user request
+  const [customInterestInput, setCustomInterestInput] = useState("");
+  const [searchFriendsQuery, setSearchFriendsQuery] = useState("");
+  const [postsSearchQuery, setPostsSearchQuery] = useState("");
+  const [postsCategoryFilter, setPostsCategoryFilter] = useState("all");
+  const [visiblePostsCount, setVisiblePostsCount] = useState(5);
+  const [showStickersAndGifs, setShowStickersAndGifs] = useState(false);
+  const [stickersAndGifsTab, setStickersAndGifsTab] = useState<"stickers" | "gifs">("stickers");
+
+  const STICKERS_LIST = [
+    { id: "s1", name: "Cool Cat", url: "https://media.giphy.com/media/C9x8gX02SnMIoAclby/giphy.gif" },
+    { id: "s2", name: "Happy Shiba", url: "https://media.giphy.com/media/L3305Li1RCoFa3bkuO/giphy.gif" },
+    { id: "s3", name: "Cute Panda", url: "https://media.giphy.com/media/13CoXDiaCcC9R6/giphy.gif" },
+    { id: "s4", name: "Thumbs Up", url: "https://media.giphy.com/media/Lp71UIp7G19OBG8UP4/giphy.gif" },
+    { id: "s5", name: "Love Heart", url: "https://media.giphy.com/media/l0HrO2O3P1334U4q4/giphy.gif" },
+    { id: "s6", name: "Fire", url: "https://media.giphy.com/media/3o72F8t9TDi2xVnxOE/giphy.gif" },
+    { id: "s7", name: "Clap Hands", url: "https://media.giphy.com/media/3o7qDQ4kcSD1PLM3BK/giphy.gif" },
+    { id: "s8", name: "Party", url: "https://media.giphy.com/media/l0IybQ6l8UBvXncly/giphy.gif" }
+  ];
+
+  const GIFS_LIST = [
+    { id: "g1", name: "Excited", url: "https://media.giphy.com/media/12u37L9UPUX9Ek/giphy.gif" },
+    { id: "g2", name: "Mind Blown", url: "https://media.giphy.com/media/26ufdipOdAL5WArf6/giphy.gif" },
+    { id: "g3", name: "Cat Typing", url: "https://media.giphy.com/media/3oriO0OEd9QIDdllqo/giphy.gif" },
+    { id: "g4", name: "Laughing", url: "https://media.giphy.com/media/10YqgGno9beCBy/giphy.gif" },
+    { id: "g5", name: "Thumbs Up", url: "https://media.giphy.com/media/3o7abKhOpu0NXS3HBC/giphy.gif" },
+    { id: "g6", name: "Shocked", url: "https://media.giphy.com/media/3o72F8t9TDi2xVnxOE/giphy.gif" },
+    { id: "g7", name: "Happy Tears", url: "https://media.giphy.com/media/2WxWfocaVudCOEP4bC/giphy.gif" },
+    { id: "g8", name: "Party Time", url: "https://media.giphy.com/media/l2JhIerYVf8b6E2l2/giphy.gif" }
+  ];
 
   // ----------------------------------------------------
   // ADDITIONAL USER-REQUESTED MODULES (GEOLOCATING, SUMMARIES, GIFS, SMART REPLIES, THEMES)
@@ -538,6 +596,69 @@ export default function App() {
 
     return () => clearInterval(interval);
   }, [db, myProfile.id, authUser]);
+
+  // Real-time Call Signaling listener
+  useEffect(() => {
+    if (!db || !authUser || !myProfile.id || myProfile.id !== authUser.uid) return;
+
+    // 1. Listen to calls where I am the receiver (incoming calls)
+    const receiverRef = doc(db, "calls", myProfile.id);
+    const unsubReceiver = onSnapshot(receiverRef, (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        if (data.status === "ringing") {
+          setCallState({
+            type: data.type,
+            status: "incoming",
+            partnerId: data.callerId,
+            partnerName: data.callerName,
+            partnerAvatar: data.callerAvatar
+          });
+        } else if (data.status === "connected" && callState.status === "ringing") {
+          // Caller side: Receiver answered
+          setCallState(prev => ({ ...prev, status: "connected" }));
+        } else if (data.status === "ended") {
+          // Terminated
+          setCallState({ type: "none", status: "idle" });
+          if (localStream) {
+            localStream.getTracks().forEach(track => track.stop());
+            setLocalStream(null);
+          }
+        }
+      }
+    }, (err) => {
+      console.error("Receiver call snapshot error:", err);
+      handleFirestoreError(err, OperationType.GET, `calls/${myProfile.id}`);
+    });
+
+    // 2. If I am the caller, I also want to listen to B's document to see if they accepted or ended the call
+    let unsubCaller: (() => void) | null = null;
+    if (callState.partnerId && callState.partnerId !== "ai-assistant") {
+      const partnerRef = doc(db, "calls", callState.partnerId);
+      unsubCaller = onSnapshot(partnerRef, (docSnap) => {
+        if (docSnap.exists()) {
+          const data = docSnap.data();
+          if (data.status === "connected") {
+            setCallState(prev => ({ ...prev, status: "connected" }));
+          } else if (data.status === "ended") {
+            setCallState({ type: "none", status: "idle" });
+            if (localStream) {
+              localStream.getTracks().forEach(track => track.stop());
+              setLocalStream(null);
+            }
+          }
+        }
+      }, (err) => {
+        console.error("Caller call snapshot error:", err);
+        handleFirestoreError(err, OperationType.GET, `calls/${callState.partnerId}`);
+      });
+    }
+
+    return () => {
+      unsubReceiver();
+      if (unsubCaller) unsubCaller();
+    };
+  }, [db, myProfile.id, callState.status, callState.partnerId, localStream]);
 
   // 4. Seeding initial users and communities if database is empty
   useEffect(() => {
@@ -752,6 +873,7 @@ export default function App() {
       setStories(list);
     }, (err) => {
       console.error("Stories snapshot error:", err);
+      handleFirestoreError(err, OperationType.GET, "stories");
     });
     return () => unsubscribe();
   }, [db, authUser, myProfile.id]);
@@ -797,6 +919,7 @@ export default function App() {
       setPosts(list);
     }, (err) => {
       console.error("Posts snapshot error:", err);
+      handleFirestoreError(err, OperationType.GET, "posts");
     });
     return () => unsubscribe();
   }, [db, authUser, myProfile.id]);
@@ -1354,6 +1477,41 @@ export default function App() {
     }
   };
 
+  // Report/flag a post
+  const handleReportPost = async (postId: string) => {
+    if (!postId || !myProfile.id) return;
+    
+    // First, flag locally so user immediately sees response
+    triggerAlert("Post has been flagged and reported. Our safety team will review it.", "success");
+
+    try {
+      if (db) {
+        // Try direct doc update
+        const postRef = doc(db, "posts", postId);
+        await updateDoc(postRef, {
+          reports: arrayUnion(myProfile.id)
+        });
+      }
+    } catch (err) {
+      console.error("Failed to flag post in Firestore:", err);
+      // Fallback: search for custom doc match if needed
+      try {
+        if (db) {
+          const q = query(collection(db, "posts"), where("id", "==", postId));
+          const querySnapshot = await getDocs(q);
+          const updatePromises = querySnapshot.docs.map(docSnap => 
+            updateDoc(doc(db, "posts", docSnap.id), {
+              reports: arrayUnion(myProfile.id)
+            })
+          );
+          await Promise.all(updatePromises);
+        }
+      } catch (innerErr) {
+        console.error("Deep report fallback also failed:", innerErr);
+      }
+    }
+  };
+
   // Toggle like
   const handleToggleLike = async (postId: string) => {
     if (!postId || !myProfile.id) return;
@@ -1481,6 +1639,27 @@ export default function App() {
   const radarPosts = useMemo(() => {
     return mergedPosts.filter(post => {
       if (post.type !== "public" && post.type !== "nearby_public") return false;
+
+      // 1. Keyword search (by content or username)
+      if (postsSearchQuery.trim()) {
+        const queryStr = postsSearchQuery.toLowerCase().trim();
+        const matchesContent = post.content?.toLowerCase().includes(queryStr);
+        const matchesUser = post.userName?.toLowerCase().includes(queryStr);
+        const matchesCategory = post.category?.toLowerCase().includes(queryStr);
+        if (!matchesContent && !matchesUser && !matchesCategory) return false;
+      }
+
+      // 2. Category / Content type filter
+      if (postsCategoryFilter !== "all") {
+        if (postsCategoryFilter === "text") {
+          if (post.mediaUrl) return false;
+        } else if (postsCategoryFilter === "image") {
+          if (!post.mediaUrl || post.mediaType === "video") return false;
+        } else if (postsCategoryFilter === "video") {
+          if (post.mediaType !== "video") return false;
+        }
+      }
+
       if (post.userId === myProfile.id) return true;
 
       const dist = calculateDistance(
@@ -1499,22 +1678,29 @@ export default function App() {
         return true;
       }
     });
-  }, [mergedPosts, publicPostsScope, myProfile.latitude, myProfile.longitude, searchRadius, myProfile.id]);
+  }, [mergedPosts, publicPostsScope, myProfile.latitude, myProfile.longitude, searchRadius, myProfile.id, postsSearchQuery, postsCategoryFilter]);
 
   // Radians to match people dynamically
   const filteredPeople = nearbyPeople.filter(person => {
+    // Except friends who are in my friends list (accepted status)
+    if (person.status === "accepted") return false;
+
+    // Search field: searching user ID or Name should appear
+    if (searchFriendsQuery.trim()) {
+      const query = searchFriendsQuery.toLowerCase().trim();
+      const matchesId = person.id.toLowerCase().includes(query);
+      const matchesName = person.name.toLowerCase().includes(query);
+      return matchesId || matchesName;
+    }
+
     // Distance check
     if (person.distance > searchRadius) return false;
-    // Interest filter check
-    if (activeInterestFilter !== "all" && !person.interests.includes(activeInterestFilter)) {
-      return false;
-    }
+
     return true;
   });
 
   const filteredCommunities = communities.filter(comm => {
     if (comm.distance > searchRadius) return false;
-    if (activeInterestFilter !== "all" && comm.category !== activeInterestFilter) return false;
     return true;
   });
 
@@ -1705,6 +1891,15 @@ export default function App() {
         triggerAlert("Failed to send message.", "error");
       }
     }
+  };
+
+  const handleSendStickerOrGif = (url: string, type: "sticker" | "gif") => {
+    handleSendMessage(type === "sticker" ? "[Sticker]" : "[GIF]", "image", {
+      name: `${type}.gif`,
+      size: "100KB",
+      url: url
+    });
+    setShowStickersAndGifs(false);
   };
 
   // Instant Translate using server-side Gemini endpoint
@@ -1935,7 +2130,7 @@ export default function App() {
   };
 
   // Initiate calls
-  const startCall = (type: "voice" | "video") => {
+  const startCall = async (type: "voice" | "video") => {
     const activeContact = nearbyPeople.find(p => p.id === activeChatId);
     if (!activeContact && activeChatId !== "ai-assistant") return;
 
@@ -1952,16 +2147,94 @@ export default function App() {
 
     triggerAlert(`Initiating WebRTC peer path. Ringing ${name}...`, "info");
 
-    // Connect after 2.5 seconds
-    setTimeout(() => {
-      setCallState(prev => ({ ...prev, status: "connected" }));
-      triggerAlert(`WebRTC peer-to-peer connection established securely!`, "success");
-    }, 2500);
+    if (activeChatId === "ai-assistant") {
+      // Connect Linky AI after 2.5 seconds
+      setTimeout(() => {
+        setCallState(prev => ({ ...prev, status: "connected" }));
+        triggerAlert(`WebRTC peer-to-peer connection established with Linky AI!`, "success");
+      }, 2500);
+      return;
+    }
+
+    if (!db) return;
+    try {
+      await setDoc(doc(db, "calls", activeChatId), {
+        callerId: myProfile.id,
+        callerName: myProfile.name,
+        callerAvatar: avatarUrl,
+        receiverId: activeChatId,
+        type: type,
+        status: "ringing",
+        createdAt: serverTimestamp()
+      });
+
+      if (type === "video") {
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+          setLocalStream(stream);
+        } catch (e) {
+          console.error("Camera access failed", e);
+        }
+      }
+    } catch (err) {
+      console.error("Failed to write call session:", err);
+    }
   };
 
-  const endCall = () => {
+  const acceptCall = async () => {
+    if (!db) return;
+    try {
+      const callRef = doc(db, "calls", myProfile.id);
+      await updateDoc(callRef, {
+        status: "connected"
+      });
+
+      if (callState.type === "video") {
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+          setLocalStream(stream);
+        } catch (e) {
+          console.error("Camera access failed", e);
+        }
+      }
+
+      setCallState(prev => ({ ...prev, status: "connected" }));
+      triggerAlert("Call connected successfully!", "success");
+    } catch (err) {
+      console.error("Failed to accept call:", err);
+    }
+  };
+
+  const declineCall = async () => {
+    if (!db) return;
+    try {
+      const callRef = doc(db, "calls", myProfile.id);
+      await updateDoc(callRef, {
+        status: "ended"
+      });
+      setCallState({ type: "none", status: "idle" });
+      triggerAlert("Call declined.", "info");
+    } catch (err) {
+      console.error("Failed to decline call:", err);
+    }
+  };
+
+  const endCall = async () => {
+    const partnerId = callState.partnerId;
     setCallState({ type: "none", status: "idle" });
+    if (localStream) {
+      localStream.getTracks().forEach(track => track.stop());
+      setLocalStream(null);
+    }
     triggerAlert("Call hung up.", "info");
+
+    if (!db || !partnerId) return;
+    try {
+      await setDoc(doc(db, "calls", partnerId), { status: "ended" }, { merge: true });
+      await setDoc(doc(db, "calls", myProfile.id), { status: "ended" }, { merge: true });
+    } catch (err) {
+      console.error("Failed to end call session in Firestore:", err);
+    }
   };
 
   // Delete message
@@ -2499,35 +2772,107 @@ export default function App() {
                         className="bg-[#F8FAFC] border border-[#E2E8F0] rounded-lg px-2.5 py-1.5 text-xs font-semibold text-[#1E293B] focus:outline-none focus:border-[#2563EB] w-full resize-none"
                       />
                     </div>
+                    <div className="flex flex-col gap-3 mb-4">
+                      <div>
+                        <label className="text-[10px] font-bold text-[#64748B] uppercase tracking-wider block mb-1">Preset Interests (Toggle to select)</label>
+                        <div className="flex flex-wrap gap-1.5">
+                          {INTERESTS_LIST.map((tag) => {
+                            const isSelected = myProfile.interests.includes(tag.id);
+                            return (
+                              <button
+                                key={tag.id}
+                                type="button"
+                                id={`tag-toggle-${tag.id}`}
+                                onClick={() => handleInterestToggle(tag.id)}
+                                className={`px-2.5 py-1.5 rounded-lg text-[11px] font-bold uppercase tracking-wider flex items-center gap-1.5 border transition-all cursor-pointer ${
+                                  isSelected 
+                                    ? "bg-[#1E293B] border-[#1E293B] text-white shadow-sm" 
+                                    : "bg-[#F8FAFC] border-[#E2E8F0] text-[#475569] hover:bg-[#F1F5F9]"
+                                }`}
+                              >
+                                <span className={isSelected ? "text-indigo-400" : "text-[#64748B]"}>
+                                  {tag.id === "coding" && <Code className="w-3.5 h-3.5" />}
+                                  {tag.id === "cricket" && <Trophy className="w-3.5 h-3.5" />}
+                                  {tag.id === "photography" && <Camera className="w-3.5 h-3.5" />}
+                                  {tag.id === "music" && <Music className="w-3.5 h-3.5" />}
+                                  {tag.id === "study" && <BookOpen className="w-3.5 h-3.5" />}
+                                </span>
+                                {tag.name}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
 
-                    {/* Profile Interest Tag Toggles */}
-                    <div className="flex flex-col gap-1.5">
-                      <label className="text-[10px] font-bold text-[#64748B] uppercase tracking-wider">My Interests (Tag for matching)</label>
-                      <div className="flex flex-wrap gap-1.5">
-                        {INTERESTS_LIST.map((tag) => {
-                          const isSelected = myProfile.interests.includes(tag.id);
-                          return (
-                            <button
-                              key={tag.id}
-                              id={`tag-toggle-${tag.id}`}
-                              onClick={() => handleInterestToggle(tag.id)}
-                              className={`px-2.5 py-1.5 rounded-lg text-[11px] font-bold uppercase tracking-wider flex items-center gap-1.5 border transition-all ${
-                                isSelected 
-                                  ? "bg-[#1E293B] border-[#1E293B] text-white shadow-sm" 
-                                  : "bg-[#F8FAFC] border-[#E2E8F0] text-[#475569] hover:bg-[#F1F5F9]"
-                              }`}
-                            >
-                              <span className={isSelected ? "text-indigo-400" : "text-[#64748B]"}>
-                                {tag.id === "coding" && <Code className="w-3.5 h-3.5" />}
-                                {tag.id === "cricket" && <Trophy className="w-3.5 h-3.5" />}
-                                {tag.id === "photography" && <Camera className="w-3.5 h-3.5" />}
-                                {tag.id === "music" && <Music className="w-3.5 h-3.5" />}
-                                {tag.id === "study" && <BookOpen className="w-3.5 h-3.5" />}
-                              </span>
-                              {tag.name}
-                            </button>
-                          );
-                        })}
+                      {/* Add Custom Interest input */}
+                      <div className="flex flex-col gap-1.5">
+                        <label className="text-[10px] font-bold text-[#64748B] uppercase tracking-wider">Add Custom Interest</label>
+                        <div className="flex gap-2">
+                          <input
+                            type="text"
+                            placeholder="Type an interest (e.g. cooking, football)..."
+                            value={customInterestInput}
+                            onChange={(e) => setCustomInterestInput(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") {
+                                e.preventDefault();
+                                const trimmed = customInterestInput.trim().toLowerCase();
+                                if (trimmed && !myProfile.interests.includes(trimmed)) {
+                                  setMyProfile(prev => ({ ...prev, interests: [...prev.interests, trimmed] }));
+                                  setCustomInterestInput("");
+                                  triggerAlert(`Added custom interest: "${trimmed}"`, "success");
+                                }
+                              }
+                            }}
+                            className="bg-[#F8FAFC] border border-[#E2E8F0] rounded-lg px-2.5 py-1.5 text-xs font-semibold text-[#1E293B] focus:outline-none focus:border-[#2563EB] flex-1"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const trimmed = customInterestInput.trim().toLowerCase();
+                              if (trimmed && !myProfile.interests.includes(trimmed)) {
+                                setMyProfile(prev => ({ ...prev, interests: [...prev.interests, trimmed] }));
+                                setCustomInterestInput("");
+                                triggerAlert(`Added custom interest: "${trimmed}"`, "success");
+                              }
+                            }}
+                            className="px-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold transition-all cursor-pointer"
+                          >
+                            Add
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* All active interests display */}
+                      <div>
+                        <label className="text-[10px] font-bold text-[#64748B] uppercase tracking-wider block mb-1">My Active Interests ({myProfile.interests.length})</label>
+                        <div className="flex flex-wrap gap-1.5 p-2 bg-[#F8FAFC] border border-[#E2E8F0] rounded-lg min-h-[44px]">
+                          {myProfile.interests.length === 0 ? (
+                            <span className="text-xs text-slate-400 font-bold self-center">No active interests yet. Choose presets or add custom interests.</span>
+                          ) : (
+                            myProfile.interests.map((int) => {
+                              const preset = INTERESTS_LIST.find(p => p.id === int);
+                              return (
+                                <span
+                                  key={int}
+                                  className="px-2.5 py-1 rounded-full text-[10px] font-extrabold uppercase tracking-wider bg-slate-100 text-slate-800 border border-slate-200 flex items-center gap-1"
+                                >
+                                  {preset ? preset.name : int}
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setMyProfile(prev => ({ ...prev, interests: prev.interests.filter(i => i !== int) }));
+                                      triggerAlert(`Removed interest "${int}"`, "info");
+                                    }}
+                                    className="hover:bg-slate-200 rounded-full p-0.5 text-slate-500 hover:text-slate-800 cursor-pointer"
+                                  >
+                                    <X className="w-3 h-3" />
+                                  </button>
+                                </span>
+                              );
+                            })
+                          )}
+                        </div>
                       </div>
                     </div>
 
@@ -3622,11 +3967,41 @@ export default function App() {
                     </div>
                   </div>
 
+                  {/* Search and Category filters for Public Posts Timeline */}
+                  <div className="bg-[#F8FAFC] border-b border-[#E2E8F0] p-3 flex flex-col sm:flex-row gap-2">
+                    <div className="flex-1 relative">
+                      <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400 pointer-events-none" />
+                      <input
+                        type="text"
+                        placeholder="Search posts by keyword..."
+                        value={postsSearchQuery}
+                        onChange={(e) => {
+                          setPostsSearchQuery(e.target.value);
+                          setVisiblePostsCount(5); // reset lazy loading on filter change
+                        }}
+                        className="bg-white border border-[#E2E8F0] rounded-lg pl-8 pr-3 py-1.5 text-xs font-semibold text-[#1E293B] focus:outline-none focus:border-[#2563EB] w-full"
+                      />
+                    </div>
+                    <select
+                      value={postsCategoryFilter}
+                      onChange={(e) => {
+                        setPostsCategoryFilter(e.target.value);
+                        setVisiblePostsCount(5); // reset lazy loading on filter change
+                      }}
+                      className="bg-white border border-[#E2E8F0] rounded-lg px-2 py-1.5 text-xs font-bold text-[#1E293B] cursor-pointer focus:outline-none focus:border-[#2563EB]"
+                    >
+                      <option value="all">All Content Types</option>
+                      <option value="text">Text Only</option>
+                      <option value="image">Images</option>
+                      <option value="video">Videos</option>
+                    </select>
+                  </div>
+
                   <div className="p-4 flex flex-col gap-4 overflow-y-auto max-h-[720px] scrollbar-thin">
                     {radarPosts.length === 0 ? (
                       <div className="text-center py-10 bg-[#F8FAFC] rounded-lg border border-dashed border-[#E2E8F0] p-6 text-slate-500 text-xs font-semibold flex flex-col items-center justify-center gap-2">
                         <MessageSquare className="w-8 h-8 text-slate-300" />
-                        <p>No public posts in {publicPostsScope === "nearby" ? "your nearby area" : "the app"} yet.</p>
+                        <p>No public posts matching filters yet.</p>
                         <button
                           onClick={() => setMobileDemoTab("share")}
                           className="mt-2 px-3 py-1.5 bg-[#2563EB] hover:bg-[#1D4ED8] text-white rounded-lg text-[10px] uppercase font-bold tracking-wider cursor-pointer"
@@ -3635,111 +4010,137 @@ export default function App() {
                         </button>
                       </div>
                     ) : (
-                      radarPosts.map((post) => {
-                        const isOwn = post.userId === myProfile.id;
-                        const hasLiked = post.likes?.includes(myProfile.id);
-                        return (
-                          <div
-                            key={post.id}
-                            className="bg-white border border-[#E2E8F0] rounded-xl overflow-hidden shadow-sm hover:shadow transition-shadow flex flex-col animate-fade-in"
-                          >
-                            {/* Header: Senders info top */}
-                            <div className="px-4 py-3 bg-[#F8FAFC]/50 border-b border-[#F1F5F9] flex items-center justify-between">
-                              <div className="flex items-center gap-2.5">
-                                <img
-                                  src={post.avatar}
-                                  alt={post.userName}
-                                  className="w-8 h-8 rounded-full border border-slate-200"
-                                  referrerPolicy="no-referrer"
-                                />
-                                <div>
-                                  <span className="text-xs font-bold text-slate-800 block leading-tight">{post.userName}</span>
-                                  <div className="flex items-center gap-1.5 mt-0.5">
-                                    <span className="text-[9px] text-slate-400 font-medium">
-                                      {post.timestamp instanceof Date 
-                                        ? post.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) 
-                                        : new Date(post.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                                    </span>
-                                    <span className="text-[9px] text-slate-300">•</span>
-                                    {post.type === "global" || post.type === "public" ? (
-                                      <span className="text-[8px] bg-blue-50 text-blue-700 font-bold px-1.5 py-0.5 rounded flex items-center gap-0.5">
-                                        <Globe className="w-2 h-2" />
-                                        Global
-                                      </span>
+                      <>
+                        <AnimatePresence mode="popLayout">
+                          {radarPosts.slice(0, visiblePostsCount).map((post) => {
+                            const isOwn = post.userId === myProfile.id;
+                            const hasLiked = post.likes?.includes(myProfile.id);
+                            const hasReported = post.reports?.includes(myProfile.id);
+                            return (
+                              <motion.div
+                                key={post.id}
+                                initial={{ opacity: 0, y: 15 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                exit={{ opacity: 0, y: -15 }}
+                                transition={{ duration: 0.25 }}
+                                className="bg-white border border-[#E2E8F0] rounded-xl overflow-hidden shadow-sm hover:shadow transition-shadow flex flex-col"
+                              >
+                                {/* Header: Senders info top */}
+                                <div className="px-4 py-3 bg-[#F8FAFC]/50 border-b border-[#F1F5F9] flex items-center justify-between">
+                                  <div className="flex items-center gap-2.5">
+                                    <img
+                                      src={post.avatar}
+                                      alt={post.userName}
+                                      className="w-8 h-8 rounded-full border border-slate-200"
+                                      referrerPolicy="no-referrer"
+                                    />
+                                    <div>
+                                      <span className="text-xs font-bold text-slate-800 block leading-tight">{post.userName}</span>
+                                      <div className="flex items-center gap-1.5 mt-0.5">
+                                        <span className="text-[9px] text-slate-400 font-medium">
+                                          {post.timestamp instanceof Date 
+                                            ? post.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) 
+                                            : new Date(post.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                        </span>
+                                        <span className="text-[9px] text-slate-300">•</span>
+                                        {post.type === "global" || post.type === "public" ? (
+                                          <span className="text-[8px] bg-blue-50 text-blue-700 font-bold px-1.5 py-0.5 rounded flex items-center gap-0.5">
+                                            <Globe className="w-2 h-2" />
+                                            Global
+                                          </span>
+                                        ) : (
+                                          <span className="text-[8px] bg-indigo-50 text-indigo-700 font-bold px-1.5 py-0.5 rounded flex items-center gap-0.5">
+                                            <Map className="w-2 h-2" />
+                                            Nearby
+                                          </span>
+                                        )}
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  {isOwn ? (
+                                    <button
+                                      onClick={() => handleDeletePost(post.id)}
+                                      className="p-1 text-slate-400 hover:text-rose-600 rounded transition-colors cursor-pointer"
+                                      title="Delete post"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                  ) : (
+                                    <button
+                                      onClick={() => handleReportPost(post.id)}
+                                      className={`p-1 text-slate-400 hover:text-rose-600 rounded transition-colors cursor-pointer ${
+                                        hasReported ? "text-rose-600 font-extrabold" : ""
+                                      }`}
+                                      title={hasReported ? "Flagged/Reported" : "Report Post"}
+                                    >
+                                      <Flag className={`w-3.5 h-3.5 ${hasReported ? "fill-rose-600 text-rose-600 animate-pulse" : ""}`} />
+                                    </button>
+                                  )}
+                                </div>
+
+                                {/* Description: Given below sender info */}
+                                <div className="px-4 py-3 text-xs text-slate-700 font-medium leading-relaxed break-words whitespace-pre-wrap">
+                                  {post.content}
+                                </div>
+
+                                {/* Post Image: Attached below description, span full width */}
+                                {post.mediaUrl && (
+                                  <div className="w-full bg-[#F8FAFC] border-t border-[#F1F5F9] max-h-96 overflow-hidden flex items-center justify-center">
+                                    {post.mediaType === "video" ? (
+                                      <video
+                                        src={post.mediaUrl}
+                                        className="w-full h-auto object-contain max-h-96"
+                                        controls
+                                        playsInline
+                                        muted
+                                      />
                                     ) : (
-                                      <span className="text-[8px] bg-indigo-50 text-indigo-700 font-bold px-1.5 py-0.5 rounded flex items-center gap-0.5">
-                                        <Map className="w-2 h-2" />
-                                        Nearby
-                                      </span>
+                                      <img
+                                        src={post.mediaUrl}
+                                        alt="Post media"
+                                        className="w-full h-auto object-contain max-h-96"
+                                        referrerPolicy="no-referrer"
+                                      />
                                     )}
                                   </div>
-                                </div>
-                              </div>
-
-                              {isOwn && (
-                                <button
-                                  onClick={() => handleDeletePost(post.id)}
-                                  className="p-1 text-slate-400 hover:text-rose-600 rounded transition-colors cursor-pointer"
-                                  title="Delete post"
-                                >
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                </button>
-                              )}
-                            </div>
-
-                            {/* Description: Given below sender info */}
-                            <div className="px-4 py-3 text-xs text-slate-700 font-medium leading-relaxed break-words whitespace-pre-wrap">
-                              {post.content}
-                            </div>
-
-                            {/* Post Image: Attached below description, span full width */}
-                            {post.mediaUrl && (
-                              <div className="w-full bg-[#F8FAFC] border-t border-[#F1F5F9] max-h-96 overflow-hidden flex items-center justify-center">
-                                {post.mediaType === "video" ? (
-                                  <video
-                                    src={post.mediaUrl}
-                                    className="w-full h-auto object-contain max-h-96"
-                                    controls
-                                    playsInline
-                                    muted
-                                  />
-                                ) : (
-                                  <img
-                                    src={post.mediaUrl}
-                                    alt="Post media"
-                                    className="w-full h-auto object-contain max-h-96"
-                                    referrerPolicy="no-referrer"
-                                  />
                                 )}
-                              </div>
-                            )}
 
-                            {/* Footer: Likes and Lifetime */}
-                            <div className="px-4 py-2.5 bg-[#F8FAFC]/30 border-t border-[#F1F5F9] flex items-center justify-between text-[10px] text-slate-500 font-medium">
-                              <button
-                                onClick={() => handleToggleLike(post.id)}
-                                className={`flex items-center gap-1.5 py-1 px-2.5 rounded-lg transition-colors cursor-pointer ${
-                                  hasLiked 
-                                    ? "bg-rose-50 text-rose-600 font-bold" 
-                                    : "bg-slate-50 hover:bg-slate-100 text-slate-600"
-                                }`}
-                              >
-                                <Heart className={`w-3.5 h-3.5 ${hasLiked ? "fill-rose-500 text-rose-500" : ""}`} />
-                                <span>{post.likes?.length || 0} Likes</span>
-                              </button>
+                                {/* Footer: Likes and Lifetime */}
+                                <div className="px-4 py-2.5 bg-[#F8FAFC]/30 border-t border-[#F1F5F9] flex items-center justify-between text-[10px] text-slate-500 font-medium">
+                                  <button
+                                    onClick={() => handleToggleLike(post.id)}
+                                    className={`flex items-center gap-1.5 py-1 px-2.5 rounded-lg transition-colors cursor-pointer ${
+                                      hasLiked 
+                                        ? "bg-rose-50 text-rose-600 font-bold" 
+                                        : "bg-slate-50 hover:bg-slate-100 text-slate-600"
+                                    }`}
+                                  >
+                                    <Heart className={`w-3.5 h-3.5 ${hasLiked ? "fill-rose-500 text-rose-500" : ""}`} />
+                                    <span>{post.likes?.length || 0} Likes</span>
+                                  </button>
 
-                              <div className="flex items-center gap-1 text-[9px] text-slate-400">
-                                <Clock className="w-3 h-3 text-slate-300" />
-                                <span>
-                                  {post.expirationHours && post.expirationHours > 0
-                                    ? `Expires in ${post.expirationHours}h`
-                                    : "Persistent (Never expires)"}
-                                </span>
-                              </div>
-                            </div>
+                                  <div className="flex items-center gap-1 text-[9px] text-slate-400">
+                                    <Clock className="w-3 h-3 text-slate-300" />
+                                    <span>
+                                      {post.expirationHours && post.expirationHours > 0
+                                        ? `Expires in ${post.expirationHours}h`
+                                        : "Persistent (Never expires)"}
+                                    </span>
+                                  </div>
+                                </div>
+                              </motion.div>
+                            );
+                          })}
+                        </AnimatePresence>
+
+                        {/* Intersection Observer target for lazy loading */}
+                        {radarPosts.length > visiblePostsCount && (
+                          <div ref={postsEndRef} className="py-4 text-center text-[10px] text-slate-400 font-bold animate-pulse">
+                            Loading older public posts...
                           </div>
-                        );
-                      })
+                        )}
+                      </>
                     )}
                   </div>
                 </div>
@@ -3752,34 +4153,19 @@ export default function App() {
                   </div>
 
                   <div className="p-4 flex flex-col gap-4">
-                    {/* Local matching category filters */}
-                    <div className="flex items-center justify-between gap-3 overflow-x-auto pb-2 border-b border-[#E2E8F0]">
-                      <span className="text-[10px] font-bold uppercase tracking-wider text-[#64748B] whitespace-nowrap shrink-0">Interests</span>
-                      <div className="flex gap-1.5 overflow-x-auto">
-                        <button
-                          onClick={() => setActiveInterestFilter("all")}
-                          className={`px-2.5 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all whitespace-nowrap ${
-                            activeInterestFilter === "all" 
-                              ? "bg-[#1E293B] text-white" 
-                              : "bg-[#F1F5F9] text-[#475569] hover:bg-[#E2E8F0]"
-                          }`}
-                        >
-                          All Matches
-                        </button>
-                        {INTERESTS_LIST.map(cat => (
-                          <button
-                            key={cat.id}
-                            onClick={() => setActiveInterestFilter(cat.id)}
-                            className={`px-2.5 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider whitespace-nowrap transition-all ${
-                              activeInterestFilter === cat.id 
-                                ? "bg-[#2563EB] text-white" 
-                                : "bg-[#F1F5F9] text-[#475569] hover:bg-[#E2E8F0]"
-                            }`}
-                          >
-                            {cat.name}
-                          </button>
-                        ))}
-                      </div>
+                    {/* Search Friends Field (Local Matches Radar) */}
+                    <div className="flex flex-col gap-1.5 border-b border-[#E2E8F0] pb-3">
+                      <label className="text-[10px] font-bold uppercase tracking-wider text-[#64748B] flex items-center gap-1">
+                        <Search className="w-3.5 h-3.5 text-[#2563EB]" />
+                        Search Friends / ID:
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="Enter username or ID to search..."
+                        value={searchFriendsQuery}
+                        onChange={(e) => setSearchFriendsQuery(e.target.value)}
+                        className="bg-[#F8FAFC] border border-[#E2E8F0] rounded-lg px-3 py-1.5 text-xs font-semibold text-[#1E293B] focus:outline-none focus:border-[#2563EB] w-full"
+                      />
                     </div>
 
                     {/* Render list of nearby matched connections */}
@@ -4453,45 +4839,103 @@ export default function App() {
                         )}
                       </div>
                     )}
-                   
-                   {/* Translate target language quick bar */}
-                   <div className="flex items-center justify-between text-[11px] text-[#64748B] border-b border-[#E2E8F0] pb-2 font-bold">
-                     <span className="flex items-center gap-1">
-                       <Languages className="w-3.5 h-3.5 text-[#2563EB] shrink-0" />
-                       Configure Translate Output target:
-                     </span>
-                     <select
-                       id="select-target-lang"
-                       value={selectedTranslationLang}
-                       onChange={(e) => setSelectedTranslationLang(e.target.value)}
-                       className="bg-white border border-[#E2E8F0] px-2 py-0.5 rounded font-extrabold text-xs text-[#1E293B] cursor-pointer focus:outline-none focus:border-[#2563EB]"
-                     >
-                       {translationLanguages.map(lang => (
-                         <option key={lang.code} value={lang.code}>{lang.name}</option>
-                       ))}
-                     </select>
-                   </div>
- 
-                   <div className="flex items-center gap-2">
-                     
-                     {/* Media Attach buttons */}
-                     <input 
-                       type="file" 
-                       ref={fileInputRef} 
-                       onChange={handleFileChange} 
-                       className="hidden" 
-                       accept="image/*,.pdf,.doc,.docx"
-                     />
-                     <button
-                       onClick={() => fileInputRef.current?.click()}
-                       className="p-2.5 bg-white hover:bg-slate-100 border border-[#E2E8F0] rounded-lg text-slate-500 hover:text-slate-800 transition-colors"
-                       title="Share images/documents (Cloudinary)"
-                     >
-                       <Paperclip className="w-4 h-4 text-[#475569]" />
-                     </button>
- 
-                     {/* Voice Note Recording Simulator button */}
-                     <button
+
+                    {/* Stickers and GIFs Tray */}
+                    {showStickersAndGifs && (
+                      <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 flex flex-col gap-2.5 shadow-inner transition-all">
+                        <div className="flex items-center justify-between border-b border-slate-200 pb-1.5">
+                          <div className="flex gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setStickersAndGifsTab("stickers")}
+                              className={`px-3 py-1 rounded-full text-[10px] font-extrabold uppercase tracking-wider transition-all cursor-pointer ${
+                                stickersAndGifsTab === "stickers" 
+                                  ? "bg-indigo-600 text-white shadow-sm" 
+                                  : "bg-white text-slate-600 hover:bg-slate-100 border border-slate-200"
+                              }`}
+                            >
+                              Stickers
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setStickersAndGifsTab("gifs")}
+                              className={`px-3 py-1 rounded-full text-[10px] font-extrabold uppercase tracking-wider transition-all cursor-pointer ${
+                                stickersAndGifsTab === "gifs" 
+                                  ? "bg-indigo-600 text-white shadow-sm" 
+                                  : "bg-white text-slate-600 hover:bg-slate-100 border border-slate-200"
+                              }`}
+                            >
+                              GIFs
+                            </button>
+                          </div>
+                          <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Click to send instantly</span>
+                        </div>
+
+                        {stickersAndGifsTab === "stickers" ? (
+                          <div className="grid grid-cols-4 sm:grid-cols-8 gap-2 max-h-40 overflow-y-auto">
+                            {STICKERS_LIST.map((st) => (
+                              <button
+                                key={st.id}
+                                type="button"
+                                onClick={() => handleSendStickerOrGif(st.url, "sticker")}
+                                className="p-1 bg-white hover:bg-indigo-50 border border-slate-150 rounded-lg hover:scale-105 transition-all duration-150 flex flex-col items-center gap-1 cursor-pointer"
+                                title={st.name}
+                              >
+                                <img src={st.url} alt={st.name} className="w-10 h-10 object-contain pointer-events-none" referrerPolicy="no-referrer" />
+                              </button>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 max-h-40 overflow-y-auto">
+                            {GIFS_LIST.map((gf) => (
+                              <button
+                                key={gf.id}
+                                type="button"
+                                onClick={() => handleSendStickerOrGif(gf.url, "gif")}
+                                className="p-1 bg-white hover:bg-indigo-50 border border-slate-150 rounded-lg hover:scale-105 transition-all duration-150 flex flex-col items-center gap-1 cursor-pointer"
+                                title={gf.name}
+                              >
+                                <img src={gf.url} alt={gf.name} className="w-full h-16 object-cover rounded pointer-events-none" referrerPolicy="no-referrer" />
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+  
+                    <div className="flex items-center gap-2">
+                      
+                      {/* Media Attach buttons */}
+                      <input 
+                        type="file" 
+                        ref={fileInputRef} 
+                        onChange={handleFileChange} 
+                        className="hidden" 
+                        accept="image/*,.pdf,.doc,.docx"
+                      />
+                      <button
+                        onClick={() => fileInputRef.current?.click()}
+                        className="p-2.5 bg-white hover:bg-slate-100 border border-[#E2E8F0] rounded-lg text-slate-500 hover:text-slate-800 transition-colors"
+                        title="Share images/documents (Cloudinary)"
+                      >
+                        <Paperclip className="w-4 h-4 text-[#475569]" />
+                      </button>
+
+                      {/* Stickers and GIFs panel trigger */}
+                      <button
+                        onClick={() => setShowStickersAndGifs(!showStickersAndGifs)}
+                        className={`p-2.5 rounded-lg border transition-all flex items-center justify-center ${
+                          showStickersAndGifs 
+                            ? "bg-indigo-600 border-indigo-600 text-white font-bold" 
+                            : "bg-white hover:bg-slate-100 border-[#E2E8F0] text-slate-500 hover:text-slate-800"
+                        }`}
+                        title="Send stickers or GIFs"
+                      >
+                        <Smile className="w-4 h-4" />
+                      </button>
+
+                      {/* Voice Note Recording Simulator button */}
+                      <button
                        onClick={toggleRecording}
                        className={`p-2.5 rounded-lg border transition-all flex items-center gap-1.5 ${
                          isRecording 
@@ -4576,17 +5020,25 @@ export default function App() {
                         ) : (
                           <div className="flex flex-col items-center gap-4">
                             <div className="w-24 h-24 rounded-full bg-indigo-500/10 border-2 border-indigo-400/40 flex items-center justify-center relative animate-pulse">
-                              <img 
-                                src={callState.partnerAvatar} 
-                                alt={callState.partnerName} 
-                                className="w-20 h-20 rounded-full bg-slate-900" 
-                                referrerPolicy="no-referrer"
-                              />
+                              {callState.partnerAvatar.length <= 4 ? (
+                                <span className="text-4xl">{callState.partnerAvatar}</span>
+                              ) : (
+                                <img 
+                                  src={callState.partnerAvatar} 
+                                  alt={callState.partnerName} 
+                                  className="w-20 h-20 rounded-full bg-slate-900 border border-slate-700" 
+                                  referrerPolicy="no-referrer"
+                                />
+                              )}
                             </div>
                             <div className="text-center">
                               <h4 className="text-base font-bold">{callState.partnerName}</h4>
                               <p className="text-xs text-indigo-400 font-mono mt-1 uppercase tracking-wider">
-                                {callState.status === "ringing" ? "Ringing via WebRTC..." : "Voice Connected"}
+                                {callState.status === "incoming" 
+                                  ? `Incoming ${callState.type === "video" ? "Video" : "Voice"} Call...` 
+                                  : callState.status === "ringing" 
+                                    ? "Ringing via WebRTC..." 
+                                    : "Voice Connected"}
                               </p>
                             </div>
                           </div>
@@ -4600,25 +5052,47 @@ export default function App() {
                         </div>
                       )}
 
-                      {/* Controls (Mute, Camera toggle, Hang up) */}
-                      <div className="flex items-center gap-6">
-                        <button className="p-3.5 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors">
-                          <MicOff className="w-5 h-5" />
-                        </button>
-                        
-                        {/* Red Hang up button */}
-                        <button 
-                          id="btn-hangup"
-                          onClick={endCall}
-                          className="p-4 rounded-full bg-rose-600 hover:bg-rose-700 text-white transition-all shadow-lg shadow-rose-600/30 transform hover:scale-110"
-                        >
-                          <PhoneOff className="w-6 h-6" />
-                        </button>
+                      {/* Controls (Mute, Camera toggle, Hang up / Accept / Decline) */}
+                      {callState.status === "incoming" ? (
+                        <div className="flex items-center gap-10 mb-4">
+                          {/* Green Accept call button */}
+                          <button 
+                            onClick={acceptCall}
+                            className="p-4 rounded-full bg-emerald-600 hover:bg-emerald-700 text-white transition-all shadow-lg shadow-emerald-600/30 transform hover:scale-110 flex items-center gap-2 font-bold text-xs uppercase tracking-widest px-6 cursor-pointer"
+                          >
+                            <Phone className="w-5 h-5 animate-bounce" />
+                            Accept
+                          </button>
 
-                        <button className="p-3.5 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors">
-                          <Volume2 className="w-5 h-5" />
-                        </button>
-                      </div>
+                          {/* Red Decline call button */}
+                          <button 
+                            onClick={declineCall}
+                            className="p-4 rounded-full bg-rose-600 hover:bg-rose-700 text-white transition-all shadow-lg shadow-rose-600/30 transform hover:scale-110 flex items-center gap-2 font-bold text-xs uppercase tracking-widest px-6 cursor-pointer"
+                          >
+                            <PhoneOff className="w-5 h-5" />
+                            Decline
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-6">
+                          <button className="p-3.5 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors cursor-pointer">
+                            <MicOff className="w-5 h-5" />
+                          </button>
+                          
+                          {/* Red Hang up button */}
+                          <button 
+                            id="btn-hangup"
+                            onClick={endCall}
+                            className="p-4 rounded-full bg-rose-600 hover:bg-rose-700 text-white transition-all shadow-lg shadow-rose-600/30 transform hover:scale-110 cursor-pointer"
+                          >
+                            <PhoneOff className="w-6 h-6" />
+                          </button>
+
+                          <button className="p-3.5 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors cursor-pointer">
+                            <Volume2 className="w-5 h-5" />
+                          </button>
+                        </div>
+                      )}
 
                     </motion.div>
                   )}

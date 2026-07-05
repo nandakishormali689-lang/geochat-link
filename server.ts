@@ -38,8 +38,8 @@ app.get("/api/health", (req, res) => {
 
 // 2. API: Server-Side AI Chat Assistant
 app.post("/api/gemini/chat", async (req, res) => {
+  const { message, history } = req.body;
   try {
-    const { message, history } = req.body;
     if (!message) {
       res.status(400).json({ error: "Message is required" });
       return;
@@ -115,8 +115,8 @@ You are chatting with a developer or social app user testing the standout "Peopl
 
 // 3. API: Instant Message Translator
 app.post("/api/gemini/translate", async (req, res) => {
+  const { text, targetLanguage } = req.body;
   try {
-    const { text, targetLanguage } = req.body;
     if (!text || !targetLanguage) {
       res.status(400).json({ error: "Text and targetLanguage are required" });
       return;

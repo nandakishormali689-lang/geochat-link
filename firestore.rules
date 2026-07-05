@@ -36,5 +36,15 @@ service cloud.firestore {
     match /stories/{storyId} {
       allow read, write: if isAuthenticated();
     }
+
+    // Posts collection rules
+    match /posts/{postId} {
+      allow read, write: if isAuthenticated();
+    }
+
+    // Calls collection rules
+    match /calls/{callId} {
+      allow read, write: if isAuthenticated();
+    }
   }
 }

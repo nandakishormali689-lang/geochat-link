@@ -87,6 +87,44 @@
         "likes": { "type": "array", "items": { "type": "string" } }
       },
       "required": ["id", "userId", "userName", "avatar", "content", "type", "timestamp", "latitude", "longitude"]
+    },
+    "Story": {
+      "title": "Story",
+      "description": "A short-lived story posted by a user",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "userName": { "type": "string" },
+        "avatar": { "type": "string" },
+        "content": { "type": "string" },
+        "type": { "type": "string" },
+        "timestamp": { "type": "object" },
+        "latitude": { "type": "number" },
+        "longitude": { "type": "number" },
+        "mediaUrl": { "type": "string" },
+        "mediaType": { "type": "string" },
+        "closeFriendIds": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      },
+      "required": ["id", "userId", "userName", "avatar"]
+    },
+    "Call": {
+      "title": "Call",
+      "description": "A direct voice or video call session between two users",
+      "type": "object",
+      "properties": {
+        "callerId": { "type": "string" },
+        "callerName": { "type": "string" },
+        "callerAvatar": { "type": "string" },
+        "receiverId": { "type": "string" },
+        "type": { "type": "string" },
+        "status": { "type": "string" },
+        "createdAt": { "type": "object" }
+      },
+      "required": ["callerId", "receiverId", "type", "status"]
     }
   },
   "firestore": {
@@ -113,6 +151,14 @@
     "/posts/{postId}": {
       "schema": "Post",
       "description": "Persistent public or local posts"
+    },
+    "/stories/{storyId}": {
+      "schema": "Story",
+      "description": "Transient stories shared by users"
+    },
+    "/calls/{callId}": {
+      "schema": "Call",
+      "description": "Active audio/video calls"
     }
   }
 }
