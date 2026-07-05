@@ -5,7 +5,7 @@ import {
   Send, Shield, CheckCircle, Copy, Check, Users, MessageCircle, AlertCircle, 
   Volume2, Video, PhoneOff, MicOff, Mic, Smile, Paperclip, Trash2, Languages,
   ChevronRight, Sparkles, Play, Square, Info, RefreshCw, X, Palette, Clock, Film, Plus,
-  Star, ChevronLeft, Pause, LogOut, Heart, Flag, Search
+  Star, ChevronLeft, Pause, LogOut, Heart, Flag, Search, ArrowLeft
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { StackFeature, ChatMessage, NearbyUser, CallState, Story, Post } from "./types";
@@ -381,6 +381,8 @@ export default function App() {
   
   // Active Chat and Conversations
   const [activeChatId, setActiveChatId] = useState<string>("ai-assistant");
+  const [inboxSearchQuery, setInboxSearchQuery] = useState("");
+  const [mobileShowInbox, setMobileShowInbox] = useState<boolean>(true);
   const [conversations, setConversations] = useState<{ [id: string]: ChatMessage[] }>({
     "ai-assistant": [
       {
@@ -1715,12 +1717,20 @@ export default function App() {
     const idSeed = sum % 100;
     const timeFactor = (radarTime * (0.01 + (idSeed * 0.002)));
     const angleOffset = Math.sin(timeFactor) * 0.15; // smooth angle offset
-    const radiusOffset = Math.cos(timeFactor * 1.5) * 1.5; // smooth radial offset
+    const radiusOffset = Math.cos(timeFactor * 1.5) * 2; // smooth radial offset
     
-    const angle = ((sum % 360) * (Math.PI / 180)) + angleOffset;
+    // Deterministic spread to prevent overlapping of items with similar or 0 distance
+    // We use idSeed with golden angle (137.5 degrees) for optimal distribution
+    const baseAngle = (idSeed * 137.5) * (Math.PI / 180);
+    const angle = baseAngle + angleOffset;
+    
     const maxRange = Math.max(searchRadius, 1);
-    // Limit radius between 8% and 42% from center so dots don't overflow or overlap user avatar
-    const radius = 8 + Math.min((distance / maxRange) * 34, 34) + radiusOffset; 
+    
+    // If distance is 0.0 (uninitialized or overlapping), assign a visual pseudo-distance so dots don't pile up
+    const visualDistance = distance === 0 ? (0.2 + (idSeed % 5) * 0.15) : distance;
+    
+    // Limit radius between 18% (to clear central 10x10 avatar) and 42% from center
+    const radius = 18 + Math.min((visualDistance / maxRange) * 24, 24) + radiusOffset; 
     const x = 50 + radius * Math.cos(angle);
     const y = 50 + radius * Math.sin(angle);
     return { x, y };
@@ -3456,6 +3466,7 @@ export default function App() {
                               <button
                                 onClick={() => {
                                   setActiveChatId(person.id);
+                                  setMobileShowInbox(false);
                                   setMobileDemoTab("chat");
                                   triggerAlert(`Opened conversation with ${person.name}!`, "success");
                                 }}
@@ -3494,6 +3505,8 @@ export default function App() {
                               id={`group-feed-${comm.id}`}
                               onClick={() => {
                                 setActiveChatId(comm.id);
+                                setMobileShowInbox(false);
+                                setMobileDemoTab("chat");
                                 // Seed channel message if empty
                                 if (!conversations[comm.id]) {
                                   setConversations(prev => ({
@@ -3754,7 +3767,7 @@ export default function App() {
                         </div>
 
                         {/* Interactive Nearby Nodes */}
-                        {nearbyPeople.filter(p => p.distance <= searchRadius).map((person) => {
+                        {nearbyPeople.filter(p => p.distance <= searchRadius && p.online !== false).map((person) => {
                           const { x, y } = getCoordinates(person.id, person.distance);
                           const isFriend = person.status === "accepted";
                           const isPending = person.status === "pending";
@@ -3840,6 +3853,7 @@ export default function App() {
                                 <button
                                   onClick={() => {
                                     setActiveChatId(selectedRadarTarget.id);
+                                    setMobileShowInbox(false);
                                     setMobileDemoTab("chat");
                                     triggerAlert(`Opened group channel ${selectedRadarTarget.name}!`, "success");
                                   }}
@@ -3860,6 +3874,7 @@ export default function App() {
                                 <button
                                   onClick={() => {
                                     setActiveChatId(selectedRadarTarget.id);
+                                    setMobileShowInbox(false);
                                     setMobileDemoTab("chat");
                                     triggerAlert(`Opened chat with ${selectedRadarTarget.name}!`, "success");
                                   }}
@@ -4248,6 +4263,8 @@ export default function App() {
                                     id={`btn-chat-with-${person.id}`}
                                     onClick={() => {
                                       setActiveChatId(person.id);
+                                      setMobileShowInbox(false);
+                                      setMobileDemoTab("chat");
                                       triggerAlert(`Opened chat with ${person.name}`, "success");
                                     }}
                                     className={`font-bold py-1.5 px-3 rounded text-[10px] uppercase tracking-wider transition-all flex-1 ${
@@ -4338,13 +4355,182 @@ export default function App() {
                 </div>
 
 
-              {/* Right Column: Premium Interactive Messaging Window (col-span-12) */}
-              <div className={`col-span-12 max-w-5xl mx-auto w-full flex flex-col h-[calc(100vh-175px)] md:h-[550px] max-h-[75vh] bg-white rounded-xl border border-[#E2E8F0] shadow-sm relative overflow-hidden ${mobileDemoTab === "chat" ? "flex" : "hidden"}`} id="chat-window">
+              {/* Split-screen Inbox & Chat Window Container (col-span-12) */}
+              <div className={`col-span-12 max-w-5xl mx-auto w-full flex h-[calc(100vh-175px)] md:h-[550px] max-h-[75vh] bg-white rounded-xl border border-[#E2E8F0] shadow-sm relative overflow-hidden ${mobileDemoTab === "chat" ? "flex" : "hidden"}`} id="chat-window">
                 
-                {/* 1. Header of conversation (contact info + calls + actions) */}
-                <div className="bg-[#F1F5F9] border-b border-[#E2E8F0] px-4 py-3 flex items-center justify-between gap-3 relative z-10">
-                  <div className="flex items-center gap-3">
-                    {/* Dynamic Avatar or custom icons */}
+                {/* LEFT SIDEBAR: Inbox Conversations list */}
+                <div className={`${mobileShowInbox ? "flex" : "hidden md:flex"} flex-col w-full md:w-80 border-r border-[#E2E8F0] bg-[#F8FAFC] h-full shrink-0`} id="inbox-sidebar">
+                  {/* Sidebar Title */}
+                  <div className="px-4 py-3 bg-[#F1F5F9] border-b border-[#E2E8F0] flex items-center justify-between shrink-0">
+                    <h3 className="text-xs font-extrabold uppercase tracking-wider text-[#64748B] flex items-center gap-1.5">
+                      <MessageCircle className="w-3.5 h-3.5 text-[#2563EB]" />
+                      My Inbox
+                    </h3>
+                    <span className="text-[9px] bg-blue-100 text-[#1E40AF] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider">
+                      {nearbyPeople.filter(p => p.status === "accepted" && p.online).length} Active
+                    </span>
+                  </div>
+
+                  {/* Search Bar */}
+                  <div className="p-2 border-b border-[#E2E8F0] bg-white shrink-0">
+                    <div className="relative">
+                      <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 transform -translate-y-1/2" />
+                      <input 
+                        type="text" 
+                        placeholder="Search chats..." 
+                        value={inboxSearchQuery}
+                        onChange={(e) => setInboxSearchQuery(e.target.value)}
+                        className="w-full bg-[#F1F5F9] border border-transparent rounded-lg pl-8 pr-2.5 py-1.5 text-[11px] font-bold text-[#1E293B] placeholder-slate-400 focus:outline-none focus:bg-white focus:border-[#2563EB]"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Conversations List */}
+                  <div className="flex-1 overflow-y-auto p-2 flex flex-col gap-1.5">
+                    {/* 1. Linky AI Assistant Item */}
+                    {("Linky AI Assistant".toLowerCase().includes(inboxSearchQuery.toLowerCase()) || "Gemini".toLowerCase().includes(inboxSearchQuery.toLowerCase())) && (
+                      <button
+                        onClick={() => {
+                          setActiveChatId("ai-assistant");
+                          setMobileShowInbox(false);
+                        }}
+                        className={`w-full p-2.5 rounded-lg border text-left transition-all flex items-center justify-between cursor-pointer ${
+                          activeChatId === "ai-assistant" 
+                            ? "bg-[#EFF6FF] border-[#BFDBFE] text-[#1E40AF] shadow-sm font-bold" 
+                            : "bg-white hover:bg-slate-50 border-[#E2E8F0] text-slate-700 font-bold"
+                        }`}
+                      >
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <div className="relative shrink-0">
+                            <div className="w-9 h-9 rounded-lg bg-[#2563EB] text-white flex items-center justify-center text-base font-bold shadow-sm border border-blue-400/20">
+                              🤖
+                            </div>
+                            <span className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-[#10B981] rounded-full border-2 border-white"></span>
+                          </div>
+                          <div className="min-w-0">
+                            <h4 className="text-xs font-bold truncate leading-tight">Linky AI Assistant</h4>
+                            <p className="text-[10px] text-emerald-600 font-bold mt-0.5 flex items-center gap-1">
+                              <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse"></span>
+                              Active now
+                            </p>
+                          </div>
+                        </div>
+                      </button>
+                    )}
+
+                    {/* 2. Friends Conversations Items */}
+                    {nearbyPeople
+                      .filter(p => p.status === "accepted")
+                      .filter(p => p.name.toLowerCase().includes(inboxSearchQuery.toLowerCase()))
+                      .map(person => {
+                        const isSelected = activeChatId === person.id;
+                        const latestMsg = conversations[person.id]?.[conversations[person.id].length - 1];
+                        return (
+                          <button
+                            key={person.id}
+                            onClick={() => {
+                              setActiveChatId(person.id);
+                              setMobileShowInbox(false);
+                            }}
+                            className={`w-full p-2.5 rounded-lg border text-left transition-all flex items-center justify-between cursor-pointer ${
+                              isSelected 
+                                ? "bg-[#EFF6FF] border-[#BFDBFE] text-[#1E40AF] shadow-sm font-bold" 
+                                : "bg-white hover:bg-slate-50 border-[#E2E8F0] text-slate-700 font-bold"
+                            }`}
+                          >
+                            <div className="flex items-center gap-2.5 min-w-0 w-full">
+                              <div className="relative shrink-0">
+                                <img src={person.avatar} alt={person.name} className="w-9 h-9 rounded-lg border border-slate-200 object-contain bg-slate-50" referrerPolicy="no-referrer" />
+                                {person.online && (
+                                  <span className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-[#10B981] rounded-full border-2 border-white"></span>
+                                )}
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center justify-between gap-1">
+                                  <h4 className="text-xs font-extrabold truncate leading-tight text-slate-800">{person.name}</h4>
+                                  {latestMsg && (
+                                    <span className="text-[8px] font-medium text-slate-400 shrink-0">{latestMsg.timestamp}</span>
+                                  )}
+                                </div>
+                                <p className="text-[10px] text-slate-400 font-medium truncate mt-0.5">
+                                  {latestMsg ? latestMsg.text : "No messages yet"}
+                                </p>
+                                <p className={`text-[9px] font-bold mt-0.5 flex items-center gap-1 ${person.online ? "text-emerald-600" : "text-slate-400"}`}>
+                                  <span className={`w-1 h-1 rounded-full ${person.online ? "bg-emerald-500 animate-pulse" : "bg-slate-300"}`}></span>
+                                  {person.online ? "Active now" : "Offline"}
+                                </p>
+                              </div>
+                            </div>
+                          </button>
+                        );
+                      })}
+
+                    {/* 3. Joined Community Group Items */}
+                    {joinedCommunities
+                      .map(id => communities.find(c => c.id === id))
+                      .filter((c): c is NonNullable<typeof c> => !!c)
+                      .filter(c => c.name.toLowerCase().includes(inboxSearchQuery.toLowerCase()))
+                      .map(comm => {
+                        const isSelected = activeChatId === comm.id;
+                        const latestMsg = conversations[comm.id]?.[conversations[comm.id].length - 1];
+                        return (
+                          <button
+                            key={comm.id}
+                            onClick={() => {
+                              setActiveChatId(comm.id);
+                              setMobileShowInbox(false);
+                            }}
+                            className={`w-full p-2.5 rounded-lg border text-left transition-all flex items-center justify-between cursor-pointer ${
+                              isSelected 
+                                ? "bg-[#EFF6FF] border-[#BFDBFE] text-[#1E40AF] shadow-sm font-bold" 
+                                : "bg-white hover:bg-slate-50 border-[#E2E8F0] text-slate-700 font-bold"
+                            }`}
+                          >
+                            <div className="flex items-center gap-2.5 min-w-0 w-full">
+                              <div className="p-1.5 rounded-lg bg-indigo-50 text-[#1E40AF] shrink-0 border border-indigo-100 flex items-center justify-center w-9 h-9">
+                                {comm.icon === "Code" && <Code className="w-4 h-4" />}
+                                {comm.icon === "Trophy" && <Trophy className="w-4 h-4" />}
+                                {comm.icon === "Camera" && <Camera className="w-4 h-4" />}
+                                {comm.icon === "BookOpen" && <BookOpen className="w-4 h-4" />}
+                                {comm.icon === "Music" && <Music className="w-4 h-4" />}
+                                {!["Code", "Trophy", "Camera", "BookOpen", "Music"].includes(comm.icon || "") && "📢"}
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center justify-between gap-1">
+                                  <h4 className="text-xs font-extrabold truncate leading-tight text-slate-800">{comm.name}</h4>
+                                  {latestMsg && (
+                                    <span className="text-[8px] font-medium text-slate-400 shrink-0">{latestMsg.timestamp}</span>
+                                  )}
+                                </div>
+                                <p className="text-[10px] text-slate-400 font-medium truncate mt-0.5">
+                                  {latestMsg ? latestMsg.text : "No messages yet"}
+                                </p>
+                                <p className="text-[9px] text-[#4F46E5] font-bold mt-0.5 flex items-center gap-1">
+                                  <span>📢</span> Group Channel
+                                </p>
+                              </div>
+                            </div>
+                          </button>
+                        );
+                      })}
+                  </div>
+                </div>
+
+                {/* RIGHT CHAT WINDOW PORT: Active chat pane */}
+                <div className={`${mobileShowInbox ? "hidden md:flex" : "flex"} flex-1 flex-col h-full bg-white relative overflow-hidden min-w-0`} id="active-chat-pane">
+                  
+                  {/* 1. Header of conversation (contact info + calls + actions) */}
+                  <div className="bg-[#F1F5F9] border-b border-[#E2E8F0] px-4 py-3 flex items-center justify-between gap-3 relative z-10">
+                    <div className="flex items-center gap-3">
+                      {/* Back button for mobile */}
+                      <button
+                        onClick={() => setMobileShowInbox(true)}
+                        className="flex md:hidden p-1.5 hover:bg-slate-200 rounded-lg text-slate-600 transition-colors mr-1 cursor-pointer shrink-0"
+                        title="Back to Inbox"
+                      >
+                        <ArrowLeft className="w-4 h-4" />
+                      </button>
+                      {/* Dynamic Avatar or custom icons */}
                     {activeChatId === "ai-assistant" ? (
                       <div className="w-10 h-10 rounded-lg bg-[#2563EB] text-white flex items-center justify-center text-lg shadow-sm font-bold border border-blue-400/20">
                         🤖
@@ -5098,7 +5284,9 @@ export default function App() {
                   )}
                 </AnimatePresence>
 
-              </div>
+                </div> {/* End of active-chat-pane */}
+
+              </div> {/* End of chat-window container */}
 
               {/* Create Community Modal */}
               <AnimatePresence>
