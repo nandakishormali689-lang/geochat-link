@@ -410,6 +410,8 @@ export default function App() {
   ]);
   const [selectedTranslationLang, setSelectedTranslationLang] = useState("es");
   const [translatingMsgId, setTranslatingMsgId] = useState<string | null>(null);
+  const [activeMessageToolbarId, setActiveMessageToolbarId] = useState<string | null>(null);
+  const [showLangMenuMsgId, setShowLangMenuMsgId] = useState<string | null>(null);
 
   // File Upload
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -1753,17 +1755,36 @@ export default function App() {
     });
 
   // Dynamic user reactions
-  const handleReaction = (messageId: string, emoji: string) => {
+  const handleReaction = async (messageId: string, emoji: string) => {
     const chatMsgs = conversations[activeChatId] || [];
+    let updatedReactions: { [key: string]: number } = {};
     const updated = chatMsgs.map(m => {
       if (m.id === messageId) {
         const r = { ...(m.reactions || {}) };
         r[emoji] = (r[emoji] || 0) + 1;
+        updatedReactions = r;
         return { ...m, reactions: r };
       }
       return m;
     });
     setConversations(prev => ({ ...prev, [activeChatId]: updated }));
+
+    // Sync to Firestore in real-time
+    if (db && activeChatId !== "ai-assistant") {
+      try {
+        const isCommunity = activeChatId.startsWith("comm-");
+        let docRef;
+        if (isCommunity) {
+          docRef = doc(db, "communities", activeChatId, "messages", messageId);
+        } else {
+          const connectionId = myProfile.id < activeChatId ? `${myProfile.id}_${activeChatId}` : `${activeChatId}_${myProfile.id}`;
+          docRef = doc(db, "connections", connectionId, "messages", messageId);
+        }
+        await updateDoc(docRef, { reactions: updatedReactions });
+      } catch (err) {
+        console.error("Failed to save reaction in Firestore:", err);
+      }
+    }
   };
 
   // Send Message logic (supports Gemini AI Assistant and generic nearby chatting simulation)
@@ -1913,7 +1934,7 @@ export default function App() {
   };
 
   // Instant Translate using server-side Gemini endpoint
-  const handleTranslateMessage = async (msgId: string, text: string) => {
+  const handleTranslateMessage = async (msgId: string, text: string, targetLangCode: string, targetLangName: string) => {
     setTranslatingMsgId(msgId);
     try {
       const response = await fetch("/api/gemini/translate", {
@@ -1923,7 +1944,7 @@ export default function App() {
         },
         body: JSON.stringify({
           text,
-          targetLanguage: translationLanguages.find(l => l.code === selectedTranslationLang)?.name || "Spanish"
+          targetLanguage: targetLangName
         })
       });
 
@@ -1934,13 +1955,35 @@ export default function App() {
       const chatMsgs = conversations[activeChatId] || [];
       const updated = chatMsgs.map(m => {
         if (m.id === msgId) {
-          return { ...m, translation: data.translation, originalText: text };
+          return { ...m, translation: data.translation, originalText: text, targetLangName };
         }
         return m;
       });
 
       setConversations(prev => ({ ...prev, [activeChatId]: updated }));
-      triggerAlert("Message translated successfully via Gemini AI!", "success");
+
+      // Sync translation to Firestore
+      if (db && activeChatId !== "ai-assistant") {
+        try {
+          const isCommunity = activeChatId.startsWith("comm-");
+          let docRef;
+          if (isCommunity) {
+            docRef = doc(db, "communities", activeChatId, "messages", msgId);
+          } else {
+            const connectionId = myProfile.id < activeChatId ? `${myProfile.id}_${activeChatId}` : `${activeChatId}_${myProfile.id}`;
+            docRef = doc(db, "connections", connectionId, "messages", msgId);
+          }
+          await updateDoc(docRef, { 
+            translation: data.translation, 
+            originalText: text,
+            targetLangName: targetLangName
+          });
+        } catch (err) {
+          console.error("Failed to save translation in Firestore:", err);
+        }
+      }
+
+      triggerAlert(`Translated into ${targetLangName}!`, "success");
     } catch (err: any) {
       console.error("Translation Error:", err);
       triggerAlert(`Could not translate: ${err.message}`, "error");
@@ -1950,18 +1993,40 @@ export default function App() {
   };
 
   // Revert/hide translation
-  const handleHideTranslation = (msgId: string) => {
+  const handleHideTranslation = async (msgId: string) => {
     const chatMsgs = conversations[activeChatId] || [];
     const updated = chatMsgs.map(m => {
       if (m.id === msgId) {
         const copy = { ...m };
         delete copy.translation;
         delete copy.originalText;
+        delete copy.targetLangName;
         return copy;
       }
       return m;
     });
     setConversations(prev => ({ ...prev, [activeChatId]: updated }));
+
+    // Sync removal to Firestore
+    if (db && activeChatId !== "ai-assistant") {
+      try {
+        const isCommunity = activeChatId.startsWith("comm-");
+        let docRef;
+        if (isCommunity) {
+          docRef = doc(db, "communities", activeChatId, "messages", msgId);
+        } else {
+          const connectionId = myProfile.id < activeChatId ? `${myProfile.id}_${activeChatId}` : `${activeChatId}_${myProfile.id}`;
+          docRef = doc(db, "connections", connectionId, "messages", msgId);
+        }
+        await updateDoc(docRef, {
+          translation: null,
+          originalText: null,
+          targetLangName: null
+        });
+      } catch (err) {
+        console.error("Failed to remove translation in Firestore:", err);
+      }
+    }
   };
 
   // Firestore Connection Requests
@@ -2248,11 +2313,28 @@ export default function App() {
   };
 
   // Delete message
-  const handleDeleteMessage = (msgId: string) => {
+  const handleDeleteMessage = async (msgId: string) => {
     const chatMsgs = conversations[activeChatId] || [];
     const updated = chatMsgs.filter(m => m.id !== msgId);
     setConversations(prev => ({ ...prev, [activeChatId]: updated }));
     triggerAlert("Message deleted.", "info");
+
+    // Sync to Firestore in real-time
+    if (db && activeChatId !== "ai-assistant") {
+      try {
+        const isCommunity = activeChatId.startsWith("comm-");
+        let docRef;
+        if (isCommunity) {
+          docRef = doc(db, "communities", activeChatId, "messages", msgId);
+        } else {
+          const connectionId = myProfile.id < activeChatId ? `${myProfile.id}_${activeChatId}` : `${activeChatId}_${myProfile.id}`;
+          docRef = doc(db, "connections", connectionId, "messages", msgId);
+        }
+        await deleteDoc(docRef);
+      } catch (err) {
+        console.error("Failed to delete message in Firestore:", err);
+      }
+    }
   };
 
   if (authLoading) {
@@ -4847,11 +4929,16 @@ export default function App() {
                              </div>
                            ) : (
                              <div 
-                               className={`p-3 rounded-xl shadow-sm text-xs leading-relaxed relative group transition-all ${
-                                 isMe 
-                                   ? "bg-[#1E293B] text-white rounded-tr-none" 
-                                   : "bg-white text-[#1E293B] border border-[#E2E8F0] rounded-tl-none"
-                               }`}
+                               onClick={(e) => {
+                                  // Don't toggle if clicking buttons inside the toolbar
+                                  if ((e.target as HTMLElement).closest(".message-toolbar")) return;
+                                  setActiveMessageToolbarId(prev => prev === msg.id ? null : msg.id);
+                                }}
+                                className={`p-3 rounded-xl shadow-sm text-xs leading-relaxed relative group transition-all cursor-pointer ${
+                                  isMe 
+                                    ? "bg-[#1E293B] text-white rounded-tr-none" 
+                                    : "bg-white text-[#1E293B] border border-[#E2E8F0] rounded-tl-none"
+                                }`}
                              >
                                {/* Original / Main Text */}
                                <p className="whitespace-pre-wrap font-medium">{msg.text}</p>
@@ -4863,7 +4950,7 @@ export default function App() {
                                  }`}>
                                    <span className="font-bold uppercase tracking-wider flex items-center gap-1">
                                      <Languages className="w-3.5 h-3.5 shrink-0 text-[#2563EB]" />
-                                     Translated ({selectedTranslationLang.toUpperCase()}):
+                                     Translated ({msg.targetLangName || "Spanish"}):
                                    </span>
                                    <p className="italic font-medium">{msg.translation}</p>
                                    <button 
@@ -4914,53 +5001,119 @@ export default function App() {
                                  </div>
                                )}
  
-                               {/* Quick Hover Reactions Bar & Actions */}
-                               <div className={`absolute top-0 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 p-1 bg-white border border-[#E2E8F0] rounded-xl shadow-md z-10 ${
-                                 isMe ? "right-full mr-2" : "left-full ml-2"
-                               }`}>
-                                 <button 
-                                   onClick={() => handleReaction(msg.id, "👍")}
-                                   className="hover:scale-125 transition-transform"
-                                   title="Like"
-                                 >
-                                   👍
-                                 </button>
-                                 <button 
-                                   onClick={() => handleReaction(msg.id, "❤️")}
-                                   className="hover:scale-125 transition-transform"
-                                   title="Love"
-                                 >
-                                   ❤️
-                                 </button>
-                                 <button 
-                                   onClick={() => handleReaction(msg.id, "🔥")}
-                                   className="hover:scale-125 transition-transform"
-                                   title="Fire"
-                                 >
-                                   🔥
-                                 </button>
-                                 
-                                 <div className="w-px h-3 bg-slate-200 mx-1"></div>
+                               {/* Quick Reactions & Actions Toolbar (visible on click/tap and hover) */}
+                               <div 
+                                 className={`message-toolbar absolute bottom-full mb-1.5 left-1/2 transform -translate-x-1/2 md:bottom-auto md:top-0 md:translate-x-0 flex items-center gap-1.5 p-1.5 bg-white border border-[#E2E8F0] rounded-xl shadow-lg z-30 transition-all ${
+                                   activeMessageToolbarId === msg.id 
+                                     ? "opacity-100 scale-100 pointer-events-auto visible" 
+                                     : "opacity-0 scale-95 pointer-events-none invisible md:group-hover:opacity-100 md:group-hover:scale-100 md:group-hover:pointer-events-auto md:group-hover:visible"
+                                 } ${
+                                   isMe ? "md:left-auto md:right-full md:-translate-x-0 md:mr-2" : "md:right-auto md:left-full md:-translate-x-0 md:ml-2"
+                                 }`}
+                               >
+                                 {showLangMenuMsgId === msg.id ? (
+                                   /* Translation Language Selection Menu */
+                                   <div className="flex items-center gap-1">
+                                     <button 
+                                       onClick={(e) => {
+                                         e.stopPropagation();
+                                         setShowLangMenuMsgId(null);
+                                       }}
+                                       className="p-1 hover:bg-slate-100 rounded text-slate-500 flex items-center justify-center shrink-0 cursor-pointer"
+                                       title="Back"
+                                     >
+                                       <ArrowLeft className="w-3 h-3" />
+                                     </button>
+                                     <span className="text-[9px] font-bold text-[#64748B] uppercase tracking-wider mr-1 select-none">To:</span>
+                                     <div className="flex items-center gap-1 flex-nowrap overflow-x-auto max-w-[150px] md:max-w-[180px] scrollbar-none">
+                                       {[
+                                         { code: "hi", name: "Hindi 🇮🇳" },
+                                         { code: "en", name: "English 🇺🇸" },
+                                         { code: "es", name: "Spanish 🇪🇸" },
+                                         { code: "ja", name: "Japanese 🇯🇵" }
+                                       ].map((lang) => (
+                                         <button
+                                           key={lang.code}
+                                           onClick={(e) => {
+                                             e.stopPropagation();
+                                             handleTranslateMessage(msg.id, msg.text, lang.code, lang.name);
+                                             setShowLangMenuMsgId(null);
+                                             setActiveMessageToolbarId(null);
+                                           }}
+                                           className="px-2 py-0.5 text-[9px] font-bold bg-[#EFF6FF] border border-blue-200 text-[#1E40AF] rounded-md hover:bg-blue-100 transition-all shrink-0 cursor-pointer"
+                                         >
+                                           {lang.name}
+                                         </button>
+                                       ))}
+                                     </div>
+                                   </div>
+                                 ) : (
+                                   /* Standard Reactions and Tools Row */
+                                   <>
+                                     <button 
+                                       onClick={(e) => {
+                                         e.stopPropagation();
+                                         handleReaction(msg.id, "👍");
+                                         setActiveMessageToolbarId(null);
+                                       }}
+                                       className="hover:scale-125 transition-transform cursor-pointer"
+                                       title="Like"
+                                     >
+                                       👍
+                                     </button>
+                                     <button 
+                                       onClick={(e) => {
+                                         e.stopPropagation();
+                                         handleReaction(msg.id, "❤️");
+                                         setActiveMessageToolbarId(null);
+                                       }}
+                                       className="hover:scale-125 transition-transform cursor-pointer"
+                                       title="Love"
+                                     >
+                                       ❤️
+                                     </button>
+                                     <button 
+                                       onClick={(e) => {
+                                         e.stopPropagation();
+                                         handleReaction(msg.id, "🔥");
+                                         setActiveMessageToolbarId(null);
+                                       }}
+                                       className="hover:scale-125 transition-transform cursor-pointer"
+                                       title="Fire"
+                                     >
+                                       🔥
+                                     </button>
+                                     
+                                     <div className="w-px h-3 bg-slate-200 mx-1"></div>
  
-                                 {/* Instant Translate Button */}
-                                 {msg.type === "text" && !msg.translation && (
-                                   <button
-                                     id={`btn-translate-msg-${msg.id}`}
-                                     onClick={() => handleTranslateMessage(msg.id, msg.text)}
-                                     className="p-1 text-slate-500 hover:text-[#2563EB]"
-                                     title="Translate via Gemini AI"
-                                   >
-                                     <Languages className="w-3.5 h-3.5" />
-                                   </button>
+                                     {/* Instant Translate Choice Button */}
+                                     {msg.type === "text" && !msg.translation && (
+                                       <button
+                                         id={`btn-translate-msg-${msg.id}`}
+                                         onClick={(e) => {
+                                           e.stopPropagation();
+                                           setShowLangMenuMsgId(msg.id);
+                                         }}
+                                         className="p-1 text-slate-500 hover:text-[#2563EB] cursor-pointer rounded hover:bg-slate-50"
+                                         title="Choose translation language"
+                                       >
+                                         <Languages className="w-3.5 h-3.5" />
+                                       </button>
+                                     )}
+ 
+                                     <button
+                                       onClick={(e) => {
+                                         e.stopPropagation();
+                                         handleDeleteMessage(msg.id);
+                                         setActiveMessageToolbarId(null);
+                                       }}
+                                       className="p-1 text-slate-400 hover:text-rose-600 cursor-pointer rounded hover:bg-slate-50"
+                                       title="Delete message"
+                                     >
+                                       <Trash2 className="w-3.5 h-3.5" />
+                                     </button>
+                                   </>
                                  )}
- 
-                                 <button
-                                   onClick={() => handleDeleteMessage(msg.id)}
-                                   className="p-1 text-slate-400 hover:text-rose-600"
-                                   title="Delete message"
-                                 >
-                                   <Trash2 className="w-3.5 h-3.5" />
-                                 </button>
                                </div>
  
                                {/* Rendered Reactions */}
