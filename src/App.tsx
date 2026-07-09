@@ -5,7 +5,7 @@ import {
   Send, Shield, CheckCircle, Copy, Check, Users, MessageCircle, AlertCircle, 
   Volume2, Video, PhoneOff, MicOff, Mic, Smile, Paperclip, Trash2, Languages,
   ChevronRight, Sparkles, Play, Square, Info, RefreshCw, X, Palette, Clock, Film, Plus,
-  Star, ChevronLeft, Pause, LogOut, Heart, Flag, Search, ArrowLeft
+  Star, ChevronLeft, Pause, LogOut, Heart, Flag, Search, ArrowLeft, Layers
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { StackFeature, ChatMessage, NearbyUser, CallState, Story, Post } from "./types";
@@ -44,11 +44,23 @@ const firebaseConfig = {
   appId: (import.meta as any).env.VITE_FIREBASE_APP_ID
 };
 
-const firebaseApp = initializeApp(firebaseConfig);
-const db = (import.meta as any).env.VITE_FIREBASE_DATABASE_ID 
-  ? getFirestore(firebaseApp, (import.meta as any).env.VITE_FIREBASE_DATABASE_ID)
-  : getFirestore(firebaseApp);
-const auth = getAuth(firebaseApp);
+let firebaseApp: any = null;
+let db: any = null;
+let auth: any = null;
+let firebaseInitializedSuccessfully = false;
+
+if (firebaseConfig.apiKey && firebaseConfig.apiKey !== "undefined" && firebaseConfig.apiKey.trim() !== "") {
+  try {
+    firebaseApp = initializeApp(firebaseConfig);
+    db = (import.meta as any).env.VITE_FIREBASE_DATABASE_ID 
+      ? getFirestore(firebaseApp, (import.meta as any).env.VITE_FIREBASE_DATABASE_ID)
+      : getFirestore(firebaseApp);
+    auth = getAuth(firebaseApp);
+    firebaseInitializedSuccessfully = true;
+  } catch (err) {
+    console.error("Firebase failed to initialize:", err);
+  }
+}
 
 enum OperationType {
   CREATE = 'create',
@@ -202,6 +214,7 @@ export default function App() {
   
   // Geolocation and filters
   const [searchRadius, setSearchRadius] = useState<number>(5); // Default 5 km
+  const [radarFilter, setRadarFilter] = useState<"both" | "people" | "groups">("both");
   const [activeInterestFilter, setActiveInterestFilter] = useState<string>("all");
   const [joinedCommunities, setJoinedCommunities] = useState<string[]>([]);
   
@@ -446,10 +459,13 @@ export default function App() {
   // Live Radar sweeping & subtle coordinates drift state
   const [radarTime, setRadarTime] = useState(0);
   
-  // Audio Recording (Voice Message Simulation)
+  // Audio Recording (Voice Message)
   const [isRecording, setIsRecording] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
   const recordIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const [playingAudioId, setPlayingAudioId] = useState<string | null>(null);
 
   // Call System
   const [callState, setCallState] = useState<CallState>({ type: "none", status: "idle" });
@@ -529,7 +545,10 @@ export default function App() {
 
   // 1. Firebase Authentication State Change Listener
   useEffect(() => {
-    if (!db) return;
+    if (!db || !auth) {
+      setAuthLoading(false);
+      return;
+    }
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       setAuthUser(user);
       if (!user) {
@@ -537,7 +556,7 @@ export default function App() {
       }
     });
     return () => unsubscribe();
-  }, [db]);
+  }, [db, auth]);
 
   // 2. Sync logged-in user's profile from Firestore `users` collection in real-time
   useEffect(() => {
@@ -961,6 +980,21 @@ export default function App() {
           timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
         }
         
+        const readByArray = data.readBy || [];
+        if (myProfile.id && !readByArray.includes(myProfile.id)) {
+          const isCommunity = activeChatId.startsWith("comm-");
+          let msgRef;
+          if (isCommunity) {
+            msgRef = doc(db, "communities", activeChatId, "messages", doc.id);
+          } else {
+            const connectionId = myProfile.id < activeChatId ? `${myProfile.id}_${activeChatId}` : `${activeChatId}_${myProfile.id}`;
+            msgRef = doc(db, "connections", connectionId, "messages", doc.id);
+          }
+          updateDoc(msgRef, {
+            readBy: arrayUnion(myProfile.id)
+          }).catch(err => console.error("Error updating read receipt:", err));
+        }
+
         msgs.push({
           id: doc.id,
           senderId: data.senderId,
@@ -974,7 +1008,8 @@ export default function App() {
           fileSize: data.fileSize,
           translation: data.translation,
           originalText: data.originalText,
-          reactions: data.reactions || {}
+          reactions: data.reactions || {},
+          readBy: readByArray.includes(myProfile.id) ? readByArray : [...readByArray, myProfile.id]
         });
       });
 
@@ -1894,7 +1929,8 @@ export default function App() {
           senderAvatar: avatarUrl,
           text: textValue,
           timestamp: serverTimestamp(),
-          type
+          type,
+          readBy: [myProfile.id]
         };
 
         if (type === "image" && fileData) {
@@ -2186,21 +2222,81 @@ export default function App() {
     }, 1500);
   };
 
-  // Simulate audio voice notes
+  // Real audio voice notes recording & Gemini-powered transcription
   const toggleRecording = () => {
     if (isRecording) {
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+        mediaRecorderRef.current.onstop = () => {
+          const mimeType = mediaRecorderRef.current?.mimeType || "audio/webm";
+          const audioBlob = new Blob(audioChunksRef.current, { type: mimeType });
+          const reader = new FileReader();
+          reader.readAsDataURL(audioBlob);
+          reader.onloadend = async () => {
+            const base64data = reader.result as string;
+            // Strip MIME type prefix (e.g. "data:audio/webm;base64,")
+            const base64Audio = base64data.split(",")[1];
+            
+            triggerAlert("Voice note recorded! Transcribing with Gemini AI...", "info");
+            try {
+              const response = await fetch("/api/gemini/transcribe", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ 
+                  audioData: base64Audio, 
+                  mimeType: mimeType 
+                })
+              });
+              if (!response.ok) {
+                throw new Error(`HTTP error ${response.status}`);
+              }
+              const result = await response.json();
+              const transcription = result.text || "Could not transcribe audio.";
+              triggerAlert("Voice note transcribed successfully!", "success");
+              
+              const voiceData = {
+                name: `voice-note-${Date.now()}.webm`,
+                size: `${(audioBlob.size / 1024 / 1024).toFixed(2)} MB`,
+                url: base64data // Send the actual base64 uri to allow playing on any client device
+              };
+              handleSendMessage(transcription, "audio", voiceData);
+            } catch (error: any) {
+              console.error("Transcription failed:", error);
+              triggerAlert("Transcription failed. Sending raw voice note.", "error");
+              const voiceData = {
+                name: `voice-note-${Date.now()}.webm`,
+                size: `${(audioBlob.size / 1024 / 1024).toFixed(2)} MB`,
+                url: base64data
+              };
+              handleSendMessage("Voice message (transcription unavailable)", "audio", voiceData);
+            }
+          };
+        };
+
+        // Stop recording
+        mediaRecorderRef.current.stop();
+        // Stop all media tracks immediately
+        mediaRecorderRef.current.stream.getTracks().forEach(track => track.stop());
+      }
       setIsRecording(false);
-      // Simulate sending the audio file
-      triggerAlert("Voice note recorded! Transcribing and sharing with peer...", "success");
-      const fakeVoiceData = {
-        name: `voice-note-${Date.now()}.mp3`,
-        size: "0.24 MB",
-        url: "#" // Waveform simulated
-      };
-      handleSendMessage("", "audio", fakeVoiceData);
     } else {
-      setIsRecording(true);
-      triggerAlert("Microphone active. Recording your voice note...", "info");
+      audioChunksRef.current = [];
+      navigator.mediaDevices.getUserMedia({ audio: true })
+        .then(stream => {
+          setIsRecording(true);
+          triggerAlert("Recording started. Talk now...", "info");
+          const mediaRecorder = new MediaRecorder(stream);
+          mediaRecorderRef.current = mediaRecorder;
+          mediaRecorder.ondataavailable = (event) => {
+            if (event.data.size > 0) {
+              audioChunksRef.current.push(event.data);
+            }
+          };
+          mediaRecorder.start();
+        })
+        .catch(err => {
+          console.error("Microphone access denied:", err);
+          triggerAlert("Could not access microphone: " + err.message, "error");
+        });
     }
   };
 
@@ -2402,7 +2498,44 @@ export default function App() {
         </header>
 
         <main className="flex-1 flex items-center justify-center p-4">
-          <AuthScreen auth={auth} db={db} onAuthSuccess={setAuthUser} triggerAlert={triggerAlert} />
+          {!firebaseInitializedSuccessfully ? (
+            <div className="max-w-md w-full bg-[#1E293B] border border-slate-700/80 rounded-2xl p-6 text-white shadow-xl flex flex-col gap-5">
+              <div className="flex items-center gap-3 border-b border-slate-700 pb-4">
+                <div className="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400 shrink-0">
+                  <AlertCircle className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="text-base font-extrabold tracking-tight">Database & Auth Setup Needed</h2>
+                  <p className="text-[11px] text-slate-400 font-medium">Firebase initialization variables are missing</p>
+                </div>
+              </div>
+              <p className="text-xs text-slate-300 leading-relaxed font-medium">
+                To activate secure Direct Messaging, local Community Chats, and real-time Social Radar Sweep Map, a Firebase project needs to be provisioned.
+              </p>
+              <div className="bg-slate-900/60 rounded-xl p-4 border border-slate-800 flex flex-col gap-2 text-[11px] text-slate-400 font-mono">
+                <span className="text-emerald-400 font-bold uppercase tracking-wider text-[9px] mb-1">Configuration instructions:</span>
+                <p className="leading-relaxed">1. Please accept the Firebase terms in the platform UI.</p>
+                <p className="leading-relaxed">2. A secure database and auth environment will be provisioned instantly.</p>
+                <p className="leading-relaxed">3. This warning will automatically resolve upon successful setup.</p>
+              </div>
+              <div className="flex flex-col gap-2">
+                <button
+                  onClick={() => {
+                    triggerAlert("Checking database credentials & refreshing...", "info");
+                    setTimeout(() => {
+                      window.location.reload();
+                    }, 800);
+                  }}
+                  className="w-full py-2.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 text-white font-extrabold text-xs shadow-md shadow-emerald-500/10 hover:shadow-emerald-500/20 active:scale-[0.98] transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                >
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin" style={{ animationDuration: '3s' }} />
+                  Check Connection & Refresh
+                </button>
+              </div>
+            </div>
+          ) : (
+            <AuthScreen auth={auth} db={db} onAuthSuccess={setAuthUser} triggerAlert={triggerAlert} />
+          )}
         </main>
       </div>
     );
@@ -3849,17 +3982,20 @@ export default function App() {
                         </div>
 
                         {/* Interactive Nearby Nodes */}
-                        {nearbyPeople.filter(p => p.distance <= searchRadius && p.online !== false).map((person) => {
+                        {(radarFilter === "both" || radarFilter === "people") && nearbyPeople.filter(p => p.distance <= searchRadius && p.online !== false).map((person) => {
                           const { x, y } = getCoordinates(person.id, person.distance);
                           const isFriend = person.status === "accepted";
                           const isPending = person.status === "pending";
                           const isSelected = selectedRadarTarget?.id === person.id;
                           return (
-                            <button
+                            <motion.button
                               key={person.id}
+                              initial={{ scale: 0.3, opacity: 0, x: "-50%", y: "-50%" }}
+                              animate={{ scale: 1, opacity: 1, x: "-50%", y: "-50%" }}
+                              transition={{ type: "spring", stiffness: 260, damping: 22 }}
                               onClick={() => setSelectedRadarTarget({ ...person, type: 'person' })}
                               className="absolute z-30 group cursor-pointer focus:outline-none"
-                              style={{ left: `${x}%`, top: `${y}%`, transform: 'translate(-50%, -50%)' }}
+                              style={{ left: `${x}%`, top: `${y}%` }}
                             >
                               {/* Pulse Ring */}
                               <span className={`absolute -inset-1.5 rounded-full animate-ping opacity-60 ${
@@ -3874,20 +4010,23 @@ export default function App() {
                               <span className="absolute left-1/2 -translate-x-1/2 -top-6 bg-slate-900/90 text-[9px] font-bold text-white px-1.5 py-0.5 rounded border border-slate-700 pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-40">
                                 {person.name} ({person.distance.toFixed(1)} km)
                               </span>
-                            </button>
+                            </motion.button>
                           );
                         })}
 
                         {/* Interactive Communities Nodes */}
-                        {communities.filter(c => c.distance <= searchRadius).map((comm) => {
+                        {(radarFilter === "both" || radarFilter === "groups") && communities.filter(c => c.distance <= searchRadius).map((comm) => {
                           const { x, y } = getCoordinates(comm.id, comm.distance);
                           const isSelected = selectedRadarTarget?.id === comm.id;
                           return (
-                            <button
+                            <motion.button
                               key={comm.id}
+                              initial={{ scale: 0.3, opacity: 0, x: "-50%", y: "-50%" }}
+                              animate={{ scale: 1, opacity: 1, x: "-50%", y: "-50%" }}
+                              transition={{ type: "spring", stiffness: 260, damping: 22 }}
                               onClick={() => setSelectedRadarTarget({ ...comm, type: 'community' })}
                               className="absolute z-30 group cursor-pointer focus:outline-none"
-                              style={{ left: `${x}%`, top: `${y}%`, transform: 'translate(-50%, -50%)' }}
+                              style={{ left: `${x}%`, top: `${y}%` }}
                             >
                               {/* Pulse Ring */}
                               <span className={`absolute -inset-1.5 rounded-full animate-ping opacity-50 bg-indigo-500`}></span>
@@ -3900,7 +4039,7 @@ export default function App() {
                               <span className="absolute left-1/2 -translate-x-1/2 -top-6 bg-slate-900/90 text-[9px] font-bold text-white px-1.5 py-0.5 rounded border border-indigo-500 pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-40">
                                 {comm.name} ({comm.distance.toFixed(1)} km)
                               </span>
-                            </button>
+                            </motion.button>
                           );
                         })}
                       </div>
@@ -4025,6 +4164,71 @@ export default function App() {
                           <span>1 km</span>
                           <span>25 km</span>
                           <span>50 km</span>
+                        </div>
+                      </div>
+
+                      {/* Radar Target Type Filter Buttons */}
+                      <div className="flex flex-col gap-1.5 border-t border-slate-800/80 pt-3">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+                            <Layers className="w-3.5 h-3.5 text-emerald-400" />
+                            Target Visibility Filter
+                          </span>
+                          <span className="text-[9px] font-mono text-emerald-400 font-bold bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20 uppercase tracking-wider">
+                            {radarFilter === "both" ? "All Targets" : radarFilter === "people" ? "People Only" : "Groups Only"}
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-3 gap-2 mt-1">
+                          <button
+                            id="radar-filter-both"
+                            onClick={() => {
+                              setRadarFilter("both");
+                              triggerAlert("Radar filter: Showing both People & Groups", "info");
+                            }}
+                            className={`px-3 py-1.5 rounded-lg text-[10px] font-black transition-all border cursor-pointer flex items-center justify-center gap-1 shadow-sm ${
+                              radarFilter === "both"
+                                ? "bg-gradient-to-r from-emerald-500/20 to-teal-500/20 text-emerald-400 border-emerald-500/50 shadow-emerald-500/10"
+                                : "bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700"
+                            }`}
+                          >
+                            <span>👥</span> Both
+                          </button>
+                          
+                          <button
+                            id="radar-filter-people"
+                            onClick={() => {
+                              setRadarFilter("people");
+                              if (selectedRadarTarget && selectedRadarTarget.type !== "person") {
+                                setSelectedRadarTarget(null);
+                              }
+                              triggerAlert("Radar filter: Showing People Only", "info");
+                            }}
+                            className={`px-3 py-1.5 rounded-lg text-[10px] font-black transition-all border cursor-pointer flex items-center justify-center gap-1 shadow-sm ${
+                              radarFilter === "people"
+                                ? "bg-gradient-to-r from-blue-500/20 to-indigo-500/20 text-blue-400 border-blue-500/50 shadow-blue-500/10"
+                                : "bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700"
+                            }`}
+                          >
+                            <span>👤</span> People
+                          </button>
+                          
+                          <button
+                            id="radar-filter-groups"
+                            onClick={() => {
+                              setRadarFilter("groups");
+                              if (selectedRadarTarget && selectedRadarTarget.type !== "community") {
+                                setSelectedRadarTarget(null);
+                              }
+                              triggerAlert("Radar filter: Showing Groups Only", "info");
+                            }}
+                            className={`px-3 py-1.5 rounded-lg text-[10px] font-black transition-all border cursor-pointer flex items-center justify-center gap-1 shadow-sm ${
+                              radarFilter === "groups"
+                                ? "bg-gradient-to-r from-indigo-500/20 to-purple-500/20 text-indigo-400 border-indigo-500/50 shadow-indigo-500/10"
+                                : "bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700"
+                            }`}
+                          >
+                            <span>📢</span> Groups
+                          </button>
                         </div>
                       </div>
                     </div>
@@ -4980,24 +5184,68 @@ export default function App() {
                                  </div>
                                )}
  
-                               {/* Simulated Audio Voice Player */}
+                               {/* Real Audio Voice Player & Transcription display */}
                                {msg.type === "audio" && (
-                                 <div className="mt-2.5 p-2.5 rounded-lg bg-[#EFF6FF] border border-[#BFDBFE] text-[#1E40AF] flex items-center gap-2 max-w-[240px]">
-                                   <button className="w-7 h-7 rounded-full bg-[#1E40AF] flex items-center justify-center text-white shrink-0 hover:bg-blue-800">
-                                     <Play className="w-3.5 h-3.5 ml-0.5 fill-current text-white" />
-                                   </button>
-                                   <div className="flex-1 flex flex-col gap-1">
-                                     <div className="h-4 flex items-center gap-0.5">
-                                       <div className="w-1 h-2 bg-[#2563EB] rounded-full animate-pulse"></div>
-                                       <div className="w-1 h-4 bg-[#2563EB] rounded-full animate-pulse"></div>
-                                       <div className="w-1 h-3 bg-[#2563EB] rounded-full animate-pulse"></div>
-                                       <div className="w-1 h-1 bg-[#2563EB] rounded-full"></div>
-                                       <div className="w-1 h-3 bg-[#2563EB] rounded-full animate-pulse"></div>
-                                       <div className="w-1 h-4 bg-[#2563EB] rounded-full animate-pulse"></div>
-                                       <div className="w-1 h-2 bg-[#2563EB] rounded-full animate-pulse"></div>
+                                 <div className="mt-2.5 p-3 rounded-lg bg-[#EFF6FF] border border-[#BFDBFE] text-[#1E40AF] flex flex-col gap-2 max-w-[260px] shadow-sm">
+                                   <div className="flex items-center gap-2.5">
+                                     <button 
+                                       onClick={(e) => {
+                                         e.stopPropagation();
+                                         if (playingAudioId === msg.id) {
+                                           setPlayingAudioId(null);
+                                           const audioEl = document.getElementById(`audio-player-${msg.id}`) as HTMLAudioElement;
+                                           if (audioEl) audioEl.pause();
+                                         } else {
+                                           if (playingAudioId) {
+                                             const prevAudio = document.getElementById(`audio-player-${playingAudioId}`) as HTMLAudioElement;
+                                             if (prevAudio) prevAudio.pause();
+                                           }
+                                           setPlayingAudioId(msg.id);
+                                           const audioEl = document.getElementById(`audio-player-${msg.id}`) as HTMLAudioElement;
+                                           if (audioEl) {
+                                             audioEl.play().catch(err => console.error("Audio playback failed", err));
+                                             audioEl.onended = () => setPlayingAudioId(null);
+                                           }
+                                         }
+                                       }}
+                                       className="w-8 h-8 rounded-full bg-[#1E40AF] flex items-center justify-center text-white shrink-0 hover:bg-blue-800 transition-colors shadow cursor-pointer"
+                                       title={playingAudioId === msg.id ? "Pause" : "Play voice note"}
+                                     >
+                                       {playingAudioId === msg.id ? (
+                                         <Pause className="w-3.5 h-3.5 text-white" />
+                                       ) : (
+                                         <Play className="w-3.5 h-3.5 ml-0.5 fill-current text-white" />
+                                       )}
+                                     </button>
+                                     <div className="flex-1 flex flex-col gap-0.5">
+                                       <div className="h-4 flex items-center gap-0.5">
+                                         {[...Array(12)].map((_, i) => (
+                                           <div 
+                                             key={i} 
+                                             className={`w-1 rounded-full bg-[#2563EB] transition-all duration-300 ${
+                                               playingAudioId === msg.id 
+                                                 ? `animate-pulse h-${[2, 4, 3, 1, 3, 4, 2, 3, 1, 4, 2, 3][i % 12]}` 
+                                                 : "h-2"
+                                             }`}
+                                           ></div>
+                                         ))}
+                                       </div>
+                                       <span className="text-[9px] text-[#2563EB] font-mono font-bold uppercase tracking-wider">
+                                         {playingAudioId === msg.id ? "Playing Voice Note" : "Voice Note • Click to Play"}
+                                       </span>
                                      </div>
-                                     <span className="text-[9px] text-[#2563EB] font-mono font-bold">0:12 s • Recorded</span>
                                    </div>
+                                   
+                                   {/* Audio Element */}
+                                   <audio id={`audio-player-${msg.id}`} src={msg.mediaUrl} className="hidden" preload="auto" />
+
+                                   {/* Transcription View */}
+                                   {msg.text && (
+                                     <div className="bg-white/80 border border-blue-100 rounded-md p-2 text-[11px] text-slate-800 italic leading-relaxed font-medium">
+                                       <span className="not-italic font-extrabold text-[#1E40AF] block text-[9px] uppercase tracking-wider mb-0.5">Transcript:</span>
+                                       "{msg.text}"
+                                     </div>
+                                   )}
                                  </div>
                                )}
  
@@ -5047,44 +5295,53 @@ export default function App() {
                                        ))}
                                      </div>
                                    </div>
-                                 ) : (
-                                   /* Standard Reactions and Tools Row */
-                                   <>
-                                     <button 
-                                       onClick={(e) => {
-                                         e.stopPropagation();
-                                         handleReaction(msg.id, "👍");
-                                         setActiveMessageToolbarId(null);
-                                       }}
-                                       className="hover:scale-125 transition-transform cursor-pointer"
-                                       title="Like"
-                                     >
-                                       👍
-                                     </button>
-                                     <button 
-                                       onClick={(e) => {
-                                         e.stopPropagation();
-                                         handleReaction(msg.id, "❤️");
-                                         setActiveMessageToolbarId(null);
-                                       }}
-                                       className="hover:scale-125 transition-transform cursor-pointer"
-                                       title="Love"
-                                     >
-                                       ❤️
-                                     </button>
-                                     <button 
-                                       onClick={(e) => {
-                                         e.stopPropagation();
-                                         handleReaction(msg.id, "🔥");
-                                         setActiveMessageToolbarId(null);
-                                       }}
-                                       className="hover:scale-125 transition-transform cursor-pointer"
-                                       title="Fire"
-                                     >
-                                       🔥
-                                     </button>
-                                     
-                                     <div className="w-px h-3 bg-slate-200 mx-1"></div>
+                                  ) : (
+                                    /* Standard Reactions and Tools Row */
+                                    <>
+                                      <motion.button 
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          handleReaction(msg.id, "👍");
+                                          setActiveMessageToolbarId(null);
+                                        }}
+                                        whileHover={{ scale: 1.35 }}
+                                        whileTap={{ scale: [1, 1.45, 1.3], rotate: [0, -10, 10, 0] }}
+                                        transition={{ type: "spring", stiffness: 500, damping: 12 }}
+                                        className="hover:scale-125 transition-transform cursor-pointer select-none text-sm inline-block"
+                                        title="Like"
+                                      >
+                                        👍
+                                      </motion.button>
+                                      <motion.button 
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          handleReaction(msg.id, "❤️");
+                                          setActiveMessageToolbarId(null);
+                                        }}
+                                        whileHover={{ scale: 1.35 }}
+                                        whileTap={{ scale: [1, 1.45, 1.3], rotate: [0, -10, 10, 0] }}
+                                        transition={{ type: "spring", stiffness: 500, damping: 12 }}
+                                        className="hover:scale-125 transition-transform cursor-pointer select-none text-sm inline-block"
+                                        title="Love"
+                                      >
+                                        ❤️
+                                      </motion.button>
+                                      <motion.button 
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          handleReaction(msg.id, "🔥");
+                                          setActiveMessageToolbarId(null);
+                                        }}
+                                        whileHover={{ scale: 1.35 }}
+                                        whileTap={{ scale: [1, 1.45, 1.3], rotate: [0, -10, 10, 0] }}
+                                        transition={{ type: "spring", stiffness: 500, damping: 12 }}
+                                        className="hover:scale-125 transition-transform cursor-pointer select-none text-sm inline-block"
+                                        title="Fire"
+                                      >
+                                        🔥
+                                      </motion.button>
+                                      
+                                      <div className="w-px h-3 bg-slate-200 mx-1"></div>
  
                                      {/* Instant Translate Choice Button */}
                                      {msg.type === "text" && !msg.translation && (
@@ -5120,9 +5377,29 @@ export default function App() {
                                {msg.reactions && Object.keys(msg.reactions).length > 0 && (
                                  <div className="flex gap-1 mt-1.5 flex-wrap">
                                    {Object.entries(msg.reactions).map(([emoji, count]) => (
-                                     <span key={emoji} className="text-[10px] bg-[#F1F5F9] px-1.5 py-0.5 rounded-full border border-[#E2E8F0] text-[#1E293B] font-bold font-mono">
-                                       {emoji} {count}
-                                     </span>
+                                     <motion.button 
+                                       key={`${emoji}-${count}`}
+                                       onClick={(e) => {
+                                         e.stopPropagation();
+                                         handleReaction(msg.id, emoji);
+                                       }}
+                                       initial={{ scale: 0.85, opacity: 0.5 }}
+                                       animate={{ scale: [1, 1.25, 1], opacity: 1 }}
+                                       whileHover={{ scale: 1.1, backgroundColor: "#E2E8F0" }}
+                                       whileTap={{ scale: [1, 1.3, 1.1], rotate: [0, 5, -5, 0] }}
+                                       transition={{ type: "spring", stiffness: 500, damping: 10 }}
+                                       className="text-[10px] bg-[#F1F5F9] px-2 py-0.5 rounded-full border border-[#E2E8F0] text-[#1E293B] font-bold font-mono cursor-pointer flex items-center gap-1 shadow-sm select-none"
+                                       title={`React with ${emoji}`}
+                                     >
+                                       <motion.span
+                                         animate={{ scale: [1, 1.35, 1] }}
+                                         transition={{ duration: 0.2, ease: "easeOut" }}
+                                         className="inline-block"
+                                       >
+                                         {emoji}
+                                       </motion.span>
+                                       <span>{count}</span>
+                                     </motion.button>
                                    ))}
                                  </div>
                                )}
@@ -5130,9 +5407,34 @@ export default function App() {
                              </div>
                            )}
  
-                           {/* Timestamp info line */}
+                           {/* Timestamp info line & Read Status Receipts */}
                            {!isSystem && (
-                             <span className="text-[9px] text-[#64748B] mt-1 font-mono font-bold">{msg.timestamp}</span>
+                             <div className="flex items-center gap-1.5 mt-1">
+                               <span className="text-[9px] text-[#64748B] font-mono font-bold">{msg.timestamp}</span>
+                               {isMe && (
+                                 <span className="text-[9px] font-bold font-mono">
+                                   {activeChatId.startsWith("comm-") ? (
+                                     /* Community Chat */
+                                     msg.readBy && msg.readBy.filter(id => id !== myProfile.id).length > 0 ? (
+                                       <span className="text-emerald-600" title="Read by members">
+                                         ✓✓ Read by {msg.readBy.filter(id => id !== myProfile.id).length}
+                                       </span>
+                                     ) : (
+                                       <span className="text-slate-400">✓ Sent</span>
+                                     )
+                                   ) : (
+                                     /* Direct Chat */
+                                     msg.readBy && msg.readBy.includes(activeChatId) ? (
+                                       <span className="text-blue-500" title="Read by recipient">
+                                         ✓✓ Read
+                                       </span>
+                                     ) : (
+                                       <span className="text-slate-400">✓ Sent</span>
+                                     )
+                                   )}
+                                 </span>
+                               )}
+                             </div>
                            )}
                          </div>
                        );

@@ -245,6 +245,48 @@ ${conversationTranscript}`,
   }
 });
 
+// 5.5. API: Audio Voice Message Transcription via Gemini AI
+app.post("/api/gemini/transcribe", async (req, res) => {
+  try {
+    const { audioData, mimeType } = req.body;
+    if (!audioData) {
+      res.status(400).json({ error: "audioData (base64 string) is required" });
+      return;
+    }
+
+    const hasApiKey = !!process.env.GEMINI_API_KEY;
+    if (!hasApiKey) {
+      res.json({ 
+        text: "Offline transcription: Hello! This is a test transcription. To enable real-time Gemini transcription, add your GEMINI_API_KEY to the Settings Secrets panel." 
+      });
+      return;
+    }
+
+    const ai = getGeminiClient();
+
+    const audioPart = {
+      inlineData: {
+        mimeType: mimeType || "audio/webm",
+        data: audioData,
+      },
+    };
+
+    const textPart = {
+      text: "Please transcribe this audio recording accurately. Provide ONLY the transcribed text, word-for-word. Do not include any meta-commentary, introductory text, explanations, or quotes. If the audio is completely silent or unrecognizable, return exactly: [Unrecognizable audio]."
+    };
+
+    const response = await ai.models.generateContent({
+      model: "gemini-3.5-flash",
+      contents: { parts: [audioPart, textPart] },
+    });
+
+    res.json({ text: (response.text || "").trim() });
+  } catch (error: any) {
+    console.error("Gemini Transcribe API Error:", error);
+    res.status(500).json({ error: error.message || "Failed to transcribe audio" });
+  }
+});
+
 // 6. API: GIPHY & Tenor GIF/Sticker Unified Proxy Search
 app.get("/api/giphy-tenor/search", async (req, res) => {
   try {

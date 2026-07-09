@@ -22,6 +22,7 @@ export interface ChatMessage {
   originalText?: string;
   reactions?: { [emoji: string]: number };
   isEdited?: boolean;
+  readBy?: string[];
 }
 
 export interface NearbyUser {
