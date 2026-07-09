@@ -2,8 +2,7 @@ import React, { useState, useEffect, useRef, useMemo } from "react";
 import { 
   Lock, Database, MessageSquare, Server, Globe, Image, PhoneCall, Phone,
   Map, Compass, Bell, User, Cpu, Code, Trophy, Camera, Music, BookOpen, 
-  Send, Shield, CheckCircle, Copy, Check, Users, MessageCircle, AlertCircle, 
-  Volume2, Video, PhoneOff, MicOff, Mic, Smile, Paperclip, Trash2, Languages,
+  Send, Shield, CheckCircle, Copy, Check, Users, MessageCircle, AlertCircle, MapPin,  Volume2, Video, PhoneOff, MicOff, Mic, Smile, Paperclip, Trash2, Languages,
   ChevronRight, Sparkles, Play, Square, Info, RefreshCw, X, Palette, Clock, Film, Plus,
   Star, ChevronLeft, Pause, LogOut, Heart, Flag, Search, ArrowLeft, Layers
 } from "lucide-react";
@@ -575,6 +574,9 @@ export default function App() {
           longitude: data.longitude || -122.4194,
           visibility: data.visibility || "public"
         });
+        if (data.locatedArea) {
+          setUserLocatedArea(data.locatedArea);
+        }
         if (data.joinedCommunities) {
           setJoinedCommunities(data.joinedCommunities);
         }
@@ -605,6 +607,81 @@ export default function App() {
 
     return () => unsubscribe();
   }, [db, authUser]);
+
+  // Helper to dynamically re-align seeded communities around the user's location
+  const alignCommunitiesToLocation = async (lat: number, lon: number) => {
+    if (!db) return;
+    try {
+      const offsets = [
+        { id: "comm-1", latOffset: 0.008, lonOffset: 0.007 },
+        { id: "comm-2", latOffset: -0.015, lonOffset: 0.012 },
+        { id: "comm-3", latOffset: 0.022, lonOffset: -0.021 },
+        { id: "comm-4", latOffset: -0.005, lonOffset: -0.006 }
+      ];
+      for (const off of offsets) {
+        const commRef = doc(db, "communities", off.id);
+        await setDoc(commRef, {
+          latitude: lat + off.latOffset,
+          longitude: lon + off.lonOffset
+        }, { merge: true });
+      }
+    } catch (err) {
+      console.error("Failed to align communities:", err);
+    }
+  };
+
+  // Auto-locate user on startup to ensure nearby people/communities are accurate
+  useEffect(() => {
+    if (!db || !authUser || !myProfile.id) return;
+    
+    // Only auto-locate if we are at default coordinates
+    if (myProfile.latitude === 37.7749 && myProfile.longitude === -122.4194) {
+      if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+          async (position) => {
+            const { latitude, longitude } = position.coords;
+            try {
+              const response = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${latitude}&lon=${longitude}&zoom=14`);
+              let areaName = `Located near ${latitude.toFixed(4)}°N, ${longitude.toFixed(4)}°E`;
+              if (response.ok) {
+                const data = await response.json();
+                const address = data.address || {};
+                const suburb = address.suburb || address.neighbourhood || address.residential || address.village || "";
+                const city = address.city || address.town || address.state || "";
+                const country = address.country || "";
+                areaName = [suburb, city, country].filter(Boolean).join(", ") || data.display_name || areaName;
+              }
+              
+              // Sync to Firestore and local state
+              const userRef = doc(db, "users", authUser.uid);
+              await setDoc(userRef, {
+                latitude,
+                longitude,
+                locatedArea: areaName
+              }, { merge: true });
+              
+              setUserLocatedArea(areaName);
+              setMyProfile(prev => ({
+                ...prev,
+                latitude,
+                longitude
+              }));
+              
+              // Re-align seeded communities to also be nearby the user's real location!
+              await alignCommunitiesToLocation(latitude, longitude);
+              
+              triggerAlert(`Automatically located near ${areaName}!`, "success");
+            } catch (err) {
+              console.error("Auto-locate geocode error:", err);
+            }
+          },
+          (error) => {
+            console.warn("Auto-locate denied or failed:", error);
+          }
+        );
+      }
+    }
+  }, [db, authUser, myProfile.id, myProfile.latitude, myProfile.longitude]);
 
   // 3. Heartbeat & Online status keeper
   useEffect(() => {
@@ -1075,9 +1152,21 @@ export default function App() {
             latitude,
             longitude
           }));
+
+          if (db && authUser) {
+            const userRef = doc(db, "users", authUser.uid);
+            await setDoc(userRef, {
+              latitude,
+              longitude,
+              locatedArea: areaName
+            }, { merge: true });
+            
+            await alignCommunitiesToLocation(latitude, longitude);
+          }
         } catch (err) {
           console.error("Nominatim reverse geocoding failed, using coordinates:", err);
-          setUserLocatedArea(`Located near ${latitude.toFixed(4)}°N, ${longitude.toFixed(4)}°E`);
+          const fallbackArea = `Located near ${latitude.toFixed(4)}°N, ${longitude.toFixed(4)}°E`;
+          setUserLocatedArea(fallbackArea);
           triggerAlert("Successfully located! Detailed neighborhood lookup timed out.", "success");
           
           setMyProfile(prev => ({
@@ -1085,13 +1174,24 @@ export default function App() {
             latitude,
             longitude
           }));
+
+          if (db && authUser) {
+            const userRef = doc(db, "users", authUser.uid);
+            await setDoc(userRef, {
+              latitude,
+              longitude,
+              locatedArea: fallbackArea
+            }, { merge: true });
+            
+            await alignCommunitiesToLocation(latitude, longitude);
+          }
         } finally {
           setIsLocating(false);
         }
       },
       (error) => {
         console.warn("Geolocation error:", error);
-        triggerAlert("Could not obtain GPS permission. Using simulated district location.", "info");
+        triggerAlert("Could not obtain GPS permission. Please enable location permissions in your browser.", "error");
         setIsLocating(false);
       },
       { timeout: 10000 }
@@ -2932,7 +3032,7 @@ export default function App() {
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -15 }}
               transition={{ duration: 0.2 }}
-              className="flex-1 p-4 lg:p-6 pb-24 max-w-2xl mx-auto w-full flex flex-col gap-6"
+              className={`flex-1 p-4 lg:p-6 pb-24 mx-auto w-full flex flex-col gap-6 transition-all duration-300 ${mobileDemoTab === "chat" ? "max-w-5xl" : "max-w-2xl"}`}
               id="app-demo-workspace"
             >
               
@@ -3953,6 +4053,41 @@ export default function App() {
                         <span className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-ping"></span>
                         Live Sweep
                       </span>
+                    </div>
+
+                    {/* Location Bar */}
+                    <div className="bg-slate-900/40 border-b border-slate-800/60 px-4 py-2 flex flex-col sm:flex-row items-center justify-between gap-2.5">
+                      <div className="flex items-center gap-2 min-w-0 w-full sm:w-auto">
+                        <span className="p-1 rounded bg-slate-800 text-emerald-400 shrink-0">
+                          <MapPin className="w-3.5 h-3.5" />
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-[9px] font-bold text-slate-500 uppercase tracking-wider leading-none">Your Location (GPS)</p>
+                          <p className="text-xs font-extrabold text-slate-300 truncate mt-0.5" title={userLocatedArea}>
+                            {userLocatedArea || "Locating..."}
+                            {myProfile.latitude === 37.7749 && myProfile.longitude === -122.4194 && (
+                              <span className="ml-1.5 text-[8px] bg-amber-500/10 text-amber-400 border border-amber-500/20 px-1 py-0.25 rounded font-black uppercase tracking-widest">Default</span>
+                            )}
+                          </p>
+                        </div>
+                      </div>
+                      <button
+                        onClick={handleLocateMe}
+                        disabled={isLocating}
+                        className={`w-full sm:w-auto px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 shrink-0 cursor-pointer ${
+                          isLocating 
+                            ? "bg-slate-800 text-slate-400 border border-slate-700" 
+                            : "bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/30 text-emerald-400 hover:text-emerald-300"
+                        }`}
+                        id="radar-locate-me-btn"
+                      >
+                        {isLocating ? (
+                          <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                        ) : (
+                          <Compass className="w-3.5 h-3.5 animate-spin-slow" />
+                        )}
+                        {isLocating ? "Syncing GPS..." : "Update Live GPS"}
+                      </button>
                     </div>
 
                     <div className="p-4 flex flex-col gap-4 flex-1 justify-between min-h-[440px]">
